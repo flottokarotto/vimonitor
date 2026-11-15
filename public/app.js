@@ -89,7 +89,7 @@ function updateValue(kind) {
   const manual = sensor && sensor.kind !== kind;
   $(`${kind}-title`).textContent = manual ? sensor.label : kind === 'flow' ? 'Vorlauftemperatur' : 'Warmwassertemperatur';
   $(`${kind}-description`).textContent = manual ? 'Manuell gewählter Temperatursensor'
-    : kind === 'flow' ? 'Wärme auf dem Weg in dein Zuhause' : 'Dein Warmwasserspeicher im Blick';
+    : kind === 'flow' ? 'Temperatur des Heizwassers im Vorlauf' : 'Temperatur des Warmwassers';
   $(`${kind}-chart`).setAttribute('aria-label', `Zeitverlauf: ${sensor?.label ?? (kind === 'flow' ? 'Vorlauftemperatur' : 'Warmwassertemperatur')}`);
   $(`${kind}-value`).textContent = sensor ? formatNumber.format(sensor.value) : '—';
   const age = $(`${kind}-age`);

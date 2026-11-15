@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f6f7f9">
-  <meta name="description" content="Deine Viessmann-Heizung im Verlauf. Temperaturdaten lokal in SQLite.">
-  <title>ViMonitor · Deine Heizung im Verlauf</title>
+  <meta name="description" content="Temperaturverläufe einer Viessmann-Heizung mit lokaler Speicherung in SQLite.">
+  <title>ViMonitor · Heizungsdaten</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/vendor/chart.js" defer></script>
@@ -25,9 +25,9 @@
   <main>
     <section class="intro">
       <div>
-        <p class="eyebrow">DEIN HEIZUNGS-COCKPIT</p>
-        <h1>Wärme verstehen.<br><span>Verläufe entdecken.</span></h1>
-        <p class="subtitle">Vorlauf und Warmwasser auf einen Blick. Deine Daten bleiben bei dir.</p>
+        <p class="eyebrow">VIESSMANN · VICARE API</p>
+        <h1>Heizungsdaten.<br><span>Temperaturverläufe.</span></h1>
+        <p class="subtitle">Temperaturen und Sollwerte der Heizung. Die Daten werden lokal gespeichert.</p>
       </div>
       <div class="connection-summary">
         <div class="status-line"><span id="status-dot" class="dot"></span><strong id="connection">Verbindung wird geprüft</strong></div>
@@ -38,7 +38,7 @@
 
     <section id="demo-notice" class="notice demo-notice" hidden>
       <span class="notice-icon" aria-hidden="true">i</span>
-      <div><strong>Erst einmal umschauen.</strong> Du siehst simulierte Messwerte, keine Daten deiner Heizung.
+      <div><strong>Demo-Modus.</strong> Angezeigt werden simulierte Messwerte, keine Daten einer Heizung.
         <button id="demo-setup" class="inline-button">Echten Zugang einrichten</button>
       </div>
     </section>
@@ -65,7 +65,7 @@
 
     <section class="overview" aria-labelledby="overview-title">
       <div class="overview-heading">
-        <div><p class="eyebrow">TEMPERATUREN</p><h2 id="overview-title">Ein gutes Gefühl für deine Heizung.</h2></div>
+        <div><p class="eyebrow">TEMPERATUREN</p><h2 id="overview-title">Aktuelle Werte und Temperaturverläufe</h2></div>
         <button id="refresh" class="button secondary refresh-button"><span aria-hidden="true">↻</span> Anzeige aktualisieren</button>
       </div>
       <div class="toolbar">
@@ -78,14 +78,14 @@
       </div>
       <div class="chart-grid">
         <article class="card chart-card flow">
-          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">↗</span><div><h3 id="flow-title">Vorlauftemperatur</h3><span id="flow-description" class="metric-description">Wärme auf dem Weg in dein Zuhause</span></div><span class="unit-tag">°C</span></div>
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">↗</span><div><h3 id="flow-title">Vorlauftemperatur</h3><span id="flow-description" class="metric-description">Temperatur des Heizwassers im Vorlauf</span></div><span class="unit-tag">°C</span></div>
           <div class="reading"><strong id="flow-value">—</strong><span>°C</span><small id="flow-age">Noch keine Daten</small></div>
           <label class="sensor-label" for="flow-sensor">Sensor<select id="flow-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
           <div class="chart-container"><canvas id="flow-chart" role="img" aria-label="Zeitverlauf der Vorlauftemperatur"></canvas><p id="flow-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>
           <div id="flow-stats" class="chart-stats"><span>MIN <strong>—</strong></span><span>MAX <strong>—</strong></span><span>MESSUNGEN <strong>0</strong></span></div>
         </article>
         <article class="card chart-card water">
-          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≈</span><div><h3 id="water-title">Warmwassertemperatur</h3><span id="water-description" class="metric-description">Dein Warmwasserspeicher im Blick</span></div><span class="unit-tag">°C</span></div>
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≈</span><div><h3 id="water-title">Warmwassertemperatur</h3><span id="water-description" class="metric-description">Temperatur des Warmwassers</span></div><span class="unit-tag">°C</span></div>
           <div class="reading"><strong id="water-value">—</strong><span>°C</span><small id="water-age">Noch keine Daten</small></div>
           <label class="sensor-label" for="water-sensor">Sensor<select id="water-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
           <div class="chart-container"><canvas id="water-chart" role="img" aria-label="Zeitverlauf der Warmwassertemperatur"></canvas><p id="water-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>
@@ -96,7 +96,7 @@
     <article class="card chart-card comparison" aria-labelledby="compare-title">
       <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≋</span><div><h3 id="compare-title">Temperaturen vergleichen</h3><span class="metric-description">Mehrere Verläufe auf einer gemeinsamen Celsius-Achse</span></div><span class="unit-tag">°C</span></div>
       <fieldset class="compare-picker">
-        <legend>Welche Temperaturen möchtest du zusammen sehen?</legend>
+        <legend>Temperaturen für den Vergleich auswählen</legend>
         <div id="compare-sensors" class="compare-sensors"></div>
       </fieldset>
       <div class="chart-container compare-container"><canvas id="compare-chart" role="img" aria-label="Gemeinsamer Zeitverlauf der ausgewählten Temperaturen"></canvas><p id="compare-empty" class="chart-empty">Bitte mindestens eine Temperatur auswählen.</p></div>
@@ -104,11 +104,11 @@
     </article>
     <section class="details-strip" aria-label="Informationen zur Erfassung">
       <div><span class="detail-icon" aria-hidden="true">◷</span><p><strong id="poll-label">Alle 5 Minuten</strong><span>Automatische Datenerfassung</span></p></div>
-      <div><span class="detail-icon" aria-hidden="true">▤</span><p><strong>SQLite, ganz lokal</strong><span>Deine Historie bleibt erhalten</span></p></div>
-      <div><span class="detail-icon" aria-hidden="true">✓</span><p><strong>Nur lesen, nichts steuern</strong><span>Deine Einstellungen bleiben unberührt</span></p></div>
+      <div><span class="detail-icon" aria-hidden="true">▤</span><p><strong>Lokale SQLite-Datenbank</strong><span>Dauerhafte Speicherung der Messhistorie</span></p></div>
+      <div><span class="detail-icon" aria-hidden="true">✓</span><p><strong>Lesender API-Zugriff</strong><span>Keine Änderung der Heizungseinstellungen</span></p></div>
     </section>
     <p class="chart-note">Lange Zeiträume zeigen zeitliche Mittelwerte. Minima und Maxima findest du im Tooltip. Messlücken werden nicht verbunden.</p>
   </main>
-  <footer><span><strong>vimonitor</strong> <span class="footer-divider">/</span> Mehr Einblick. Weniger Rätsel.</span><a href="https://github.com/flottokarotto/vimonitor" target="_blank" rel="noreferrer">Quellcode & Anleitung ↗</a></footer>
+  <footer><span><strong>vimonitor</strong> <span class="footer-divider">/</span> Lokale Erfassung von Heizungsdaten</span><a href="https://github.com/flottokarotto/vimonitor" target="_blank" rel="noreferrer">Quellcode & Anleitung ↗</a></footer>
 </body>
 </html>
