@@ -226,3 +226,20 @@ test('collector records schedules alongside temperatures from the same API reque
   assert.equal(snapshot?.schedules.length, 0);
   assert.equal(store.readings(device, sensor, start, now).length, 2);
 });
+
+test('new demo data exercises a complete cooling assessment and personal baseline', async t => {
+  const { directory } = fixture(t);
+  const store = new Store(directory, true);
+  const config = loadConfig({ DATA_DIR: directory });
+  const now = Date.parse('2026-11-15T10:00:00Z');
+  const collector = new Collector(config, store, new Viessmann(config, store), () => now);
+  try {
+    await collector.start();
+    const result = buildInsights(store, store.getDevice(), now);
+    assert.equal(result.lastNight?.status, 'ok');
+    assert.ok(Math.abs((result.lastNight?.rate ?? 0) - 0.7) < 1e-8);
+    assert.equal(result.lastNight?.level, 'moderate');
+    assert.ok((result.comparison?.nights ?? 0) >= 3);
+    assert.equal(result.comparison?.trend, 'similar');
+  } finally { collector.stop(); store.close(); }
+});

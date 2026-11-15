@@ -6,6 +6,94 @@ const formatTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '
 const formatDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false, comparison: new Set(), comparisonInitialized: false };
 const lineColors = ['#e6744a', '#279c9d', '#7961b5', '#b08624', '#3277bd', '#c64e83', '#628c3c', '#64748b'];
+const weekDays = [['mon', 'Montag'], ['tue', 'Dienstag'], ['wed', 'Mittwoch'], ['thu', 'Donnerstag'], ['fri', 'Freitag'], ['sat', 'Samstag'], ['sun', 'Sonntag']];
+
+function scheduleEntriesText(entries) {
+  const modes = { on: 'Warmwasser freigegeben', off: 'Warmwasser aus', normal: 'Normalbetrieb', comfort: 'Komfortbetrieb', reduced: 'Absenkbetrieb', standby: 'Bereitschaft' };
+  return entries.length ? entries.map(entry => `${entry.start}–${entry.end} Uhr · ${modes[entry.mode] ?? entry.mode}`).join('; ') : 'Keine Zeitfenster eingetragen';
+}
+
+function renderInsights(insights) {
+  const { lastNight: night, comparison } = insights;
+  const valid = night?.status === 'ok';
+  const levels = { low: 'Geringer Temperaturabfall', moderate: 'Mittlerer Temperaturabfall', high: 'Stärkerer Temperaturabfall' };
+  $('cooling-badge').textContent = valid ? levels[night.level] : night?.status === 'disturbed' || night?.status === 'schedule-changed' ? 'Nicht bewertbar' : 'Noch keine Auswertung';
+  $('cooling-badge').classList.toggle('caution', valid && night.level === 'high');
+  $('cooling-message').textContent = valid
+    ? 'Beobachteter Temperaturabfall während einer planmäßigen Warmwasser-Pause. Die Einordnung ist eine grobe Orientierung.'
+    : insights.message;
+  $('cooling-values').hidden = !valid;
+  $('cooling-rate').textContent = valid ? formatNumber.format(night.rate) : '—';
+  $('cooling-drop').textContent = valid ? formatNumber.format(night.drop) : '—';
+  const date = new Intl.DateTimeFormat('de-DE', { timeZone: insights.timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  $('cooling-window').textContent = night
+    ? `Planmäßige Pause: ${date.format(night.start)}–${date.format(night.end)} Uhr (${insights.timeZone}).${valid ? ` Ausgewertet: ${date.format(night.measuredStart)}–${date.format(night.measuredEnd)} Uhr, von ${formatNumber.format(night.startTemperature)} auf ${formatNumber.format(night.endTemperature)} °C.` : ''}`
+    : '';
+  $('cooling-comparison').textContent = comparison
+    ? `Vergleich mit ${comparison.nights} früheren Nächten: ${comparison.trend === 'faster' ? 'schnellerer' : comparison.trend === 'slower' ? 'langsamerer' : 'ähnlicher'} Temperaturabfall. Bisheriger Median: ${formatNumber.format(comparison.medianRate)} °C/h.`
+    : 'Der Vergleich mit eigenen früheren Nächten erscheint automatisch, sobald mindestens drei vergleichbare Nächte vorliegen.';
+  $('schedule-status').textContent = insights.observedAt
+    ? `${insights.stale ? 'Veraltet · ' : ''}Stand ${date.format(insights.observedAt)} Uhr · ${insights.timeZone}`
+    : 'Noch keine Zeitprogramme aufgezeichnet. Sie werden bei der nächsten Messabfrage mitgelesen.';
+  const todayName = new Intl.DateTimeFormat('de-DE', { weekday: 'long', timeZone: insights.timeZone }).format(Date.now());
+  const day = weekDays.find(([, label]) => label === todayName)?.[0];
+  const today = $('schedule-today');
+  const weekly = $('schedule-week-content');
+  today.replaceChildren();
+  weekly.replaceChildren();
+  $('schedule-week').hidden = insights.schedules.length === 0;
+  if (!insights.schedules.length) {
+    const message = document.createElement('p');
+    message.className = 'insight-detail';
+    message.textContent = insights.message;
+    today.append(message);
+  }
+  for (const schedule of insights.schedules) {
+    const item = document.createElement('div');
+    item.className = 'schedule-item';
+    const title = document.createElement('strong');
+    title.textContent = `${schedule.label} · heute (${todayName})${schedule.active ? '' : ' · Zeitprogramm nicht aktiv'}`;
+    const text = document.createElement('p');
+    text.textContent = day ? scheduleEntriesText(schedule.entries[day]) : 'Wochentag konnte nicht bestimmt werden.';
+    item.append(title, text);
+    today.append(item);
+    const table = document.createElement('table');
+    table.className = 'schedule-week-table';
+    const caption = table.createCaption();
+    caption.textContent = `${schedule.label}${schedule.active ? '' : ' (nicht aktiv)'}`;
+    const body = table.createTBody();
+    for (const [key, name] of weekDays) {
+      const row = body.insertRow();
+      const heading = document.createElement('th');
+      heading.scope = 'row';
+      heading.textContent = name;
+      row.append(heading);
+      row.insertCell().textContent = scheduleEntriesText(schedule.entries[key]);
+    }
+    weekly.append(table);
+  }
+}
+
+function insightsError(message) {
+  $('cooling-badge').textContent = 'Ladefehler';
+  $('cooling-values').hidden = true;
+  $('cooling-window').textContent = '';
+  $('cooling-comparison').textContent = '';
+  $('cooling-message').textContent = `Auswertung nicht verfügbar: ${message}`;
+  $('schedule-status').textContent = 'Zeitprogramme konnten nicht geladen werden.';
+  $('schedule-today').replaceChildren();
+  $('schedule-week-content').replaceChildren();
+  $('schedule-week').hidden = true;
+}
+
+async function loadInsights() {
+  try {
+    renderInsights(await api('/api/insights'));
+  } catch (error) {
+    insightsError(error.message);
+    showError(`Auswertung konnte nicht geladen werden: ${error.message}`);
+  }
+}
 
 function updateComparisonSensors(sensors) {
   const available = new Set(sensors.map(sensor => sensor.sensor));
@@ -272,9 +360,11 @@ async function refresh() {
     const status = await api('/api/status');
     renderStatus(status);
     await loadHistories();
+    await loadInsights();
     if (status.connected && !status.demo && !status.device && !state.discovered) await loadDevices();
   } catch (error) {
     showError(`Lokaler Server nicht erreichbar: ${error.message}`);
+    insightsError(error.message);
     $('connection').textContent = 'Verbindung unterbrochen';
     $('status-dot').className = 'dot warning';
     for (const kind of ['flow', 'water']) updateValue(kind);

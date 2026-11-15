@@ -63,6 +63,40 @@
       <p id="setup-message" role="status"></p>
     </section>
 
+    <section class="insights" aria-labelledby="insights-title">
+      <div class="overview-heading"><div><p class="eyebrow">AUTOMATISCHE AUSWERTUNG</p><h2 id="insights-title">Warmwasser nachts und eingestellte Zeiten</h2></div></div>
+      <div class="insight-grid">
+        <article class="card insight-card">
+          <div class="section-title"><h3>Abkühlung in der letzten Nachtpause</h3><span id="cooling-badge" class="badge">Wird geladen</span></div>
+          <p id="cooling-message" class="insight-message" role="status">Die Auswertung wird geladen.</p>
+          <div id="cooling-values" class="cooling-values" hidden>
+            <div><strong id="cooling-rate">—</strong><span>°C pro Stunde</span></div>
+            <div><strong id="cooling-drop">—</strong><span>°C Abfall insgesamt</span></div>
+          </div>
+          <p id="cooling-window" class="insight-detail"></p>
+          <p id="cooling-comparison" class="insight-detail"></p>
+          <p class="insight-caution">Grobe Orientierung, keine Diagnose: Wasserentnahme, Zirkulation und die Position des Fühlers beeinflussen den Verlauf. Ein Zeitprogramm beweist nicht, dass nicht nachgeheizt wurde.</p>
+          <details class="insight-method">
+            <summary>Wie wird das eingeordnet?</summary>
+            <p>Projektinterne Orientierungsstufen, keine technischen Norm- oder Hygienegrenzwerte: bis 0,5 °C/h geringer, über 0,5 bis 1,5 °C/h mittlerer, über 1,5 °C/h stärkerer beobachteter Temperaturabfall. Ein stärkerer Abfall allein belegt keinen Defekt oder unnötigen Energieverbrauch.</p>
+            <p>Ausgewertet wird automatisch die längste abgeschlossene Warmwasser-Pause je Nacht im Abschnitt 18–10 Uhr, höchstens die letzten 14 Nächte. Die ersten 30 Minuten nach Ende der Freigabe und die letzten 10 Minuten vor ihrem Beginn bleiben unberücksichtigt.</p>
+            <p>Mindestens zwei Stunden Messdauer, sechs Messwerte und durchgehend aufgezeichnete Zeitprogramme sind erforderlich. Größere Lücken, Programmänderungen sowie erkennbare Temperaturanstiege oder abrupte Abfälle verhindern eine Bewertung. Berechnet wird die Differenz zwischen erstem und letztem Messwert geteilt durch die tatsächlich verstrichene Zeit.</p>
+            <p>Ab drei früheren auswertbaren Nächten mit ähnlicher Starttemperatur (±5 °C) und Pausendauer (±25 %) wird mit deren Median verglichen. Das ist ebenfalls nur ein Anhaltspunkt. Warmwasser-Sollwerte nicht allein anhand dieser Anzeige absenken; Anforderungen an die Trinkwasserhygiene beachten.</p>
+          </details>
+        </article>
+        <article class="card insight-card">
+          <h3>Zeitprogramme</h3>
+          <p id="schedule-status" class="insight-detail" role="status">Zeitprogramme werden geladen.</p>
+          <div id="schedule-today" class="schedule-today"></div>
+          <details id="schedule-week" class="insight-method" hidden>
+            <summary>Alle Wochentage anzeigen</summary>
+            <div id="schedule-week-content"></div>
+          </details>
+          <p class="insight-caution">Die Zeiten sind Freigaben bzw. Betriebsprogramme, keine tatsächlichen Brennerlaufzeiten. Außerhalb der Heizzeiten kann beispielsweise Absenkbetrieb gelten.</p>
+          <p class="insight-detail">Ob der Vorlauf zu warm ist, lässt sich daraus allein nicht bestimmen. Dafür sind unter anderem Außentemperatur, Raumtemperatur und Heizflächen erforderlich.</p>
+        </article>
+      </div>
+    </section>
     <section class="overview" aria-labelledby="overview-title">
       <div class="overview-heading">
         <div><p class="eyebrow">TEMPERATUREN</p><h2 id="overview-title">Aktuelle Werte und Temperaturverläufe</h2></div>

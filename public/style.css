@@ -96,6 +96,26 @@ select{max-width:100%;width:100%;min-width:0;background:#fafbfc;border:1px solid
 .compare-choice.color-1{--line-color:#279c9d}.compare-choice.color-2{--line-color:#7961b5}.compare-choice.color-3{--line-color:#b08624}.compare-choice.color-4{--line-color:#3277bd}.compare-choice.color-5{--line-color:#c64e83}.compare-choice.color-6{--line-color:#628c3c}.compare-choice.color-7{--line-color:#64748b}
 .comparison .compare-container{height:320px}
 .compare-summary{font-size:11px;color:#75808c;line-height:1.7;border-top:1px solid var(--border);padding:16px 0;margin:16px 0 0}
+.insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:22px;margin-top:22px}
+.insight-card{padding:24px;min-width:0}
+.insight-card .section-title{align-items:flex-start;flex-wrap:wrap}
+.insight-card .badge{letter-spacing:0;font-size:10px;text-transform:none;white-space:normal}
+.insight-card .badge.caution{background:#fff1e6;color:#9b6030}
+.insight-message{font-size:14px;line-height:1.7;margin:18px 0}
+.insight-detail,.insight-caution,.insight-method{font-size:11px;line-height:1.8;color:#75808c;overflow-wrap:anywhere}
+.insight-caution{border-top:1px solid var(--border);padding-top:14px;margin-top:18px}
+.insight-method summary{cursor:pointer;color:#4f626f;font-weight:600}
+.cooling-values{display:flex;gap:30px;margin:20px 0}
+.cooling-values>div{display:flex;flex-direction:column;gap:5px}
+.cooling-values strong{font-size:32px;font-weight:550;letter-spacing:-1px}
+.cooling-values span{font-size:11px;color:#75808c}
+.schedule-today{display:grid;gap:12px;margin:18px 0}
+.schedule-item{padding:12px;background:#f6f7f9;border-radius:7px;line-height:1.7;font-size:12px;overflow-wrap:anywhere}
+.schedule-item strong{display:block;color:#4d626f;font-size:12px}
+.schedule-item p{margin:4px 0 0;color:#75808c}
+.schedule-week-table{width:100%;border-collapse:collapse;font-size:11px;margin:12px 0 20px}
+.schedule-week-table caption{text-align:left;font-weight:600;padding:8px 0}
+.schedule-week-table th,.schedule-week-table td{text-align:left;vertical-align:top;padding:6px;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 .details-strip{display:grid;grid-template-columns:repeat(3,1fr);margin:32px 0 20px;border:1px solid var(--border);border-radius:10px;background:#f2f4f6;padding:20px 12px}
 .details-strip>div{display:flex;justify-content:center;align-items:center;gap:12px}
 .details-strip>div+div{border-left:1px solid #e2e7eb}

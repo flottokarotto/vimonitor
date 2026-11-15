@@ -68,9 +68,9 @@ und die [offizielle API-Dokumentation](https://api.viessmann-climatesolutions.co
 sind fuer Freigaben und aktuelle Limits massgeblich. Eine kostenlose Verfuegbarkeit
 bestimmter Datenpunkte wird nicht vorausgesetzt.
 
-**Der echte Heizungszugriff wurde noch nicht an einer realen Anlage getestet.**
-OAuth, Erkennung und Messabfragen sind mit simulierten API-Antworten getestet;
-der lokale Demo-Modus ist zusaetzlich im Browser geprueft.
+Der lesende Zugriff wurde an einer Vitodens-Anlage erprobt. Das ist keine
+Kompatibilitaetszusage fuer andere Anlagen. Automatisierte Tests verwenden
+simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
 
 ## Dashboard und Erfassung
 
@@ -116,6 +116,70 @@ der lokale Demo-Modus ist zusaetzlich im Browser geprueft.
 - Es gibt keine automatische Loeschung alter Daten. Fuer kontinuierliche
   Langzeitmessungen ist spaeter ein dauerhaft laufender Rechner sinnvoll.
 
+## Automatische Nacht-Auswertung und Zeitprogramme
+
+Ohne Einstellungen zeigt die Uebersicht die heutigen Warmwasser- und Heizzeiten
+sowie eine aufklappbare Wochenansicht. Sie werden bei derselben Feature-Abfrage
+wie die Temperaturen gelesen, ohne zusaetzliche API-Requests. Freigabezeitfenster
+sind keine tatsaechlichen Brennerlaufzeiten; ausserhalb der Heizzeiten kann
+beispielsweise Absenkbetrieb gelten.
+
+Die Wochenprogramme werden mit Abrufzeitpunkt und Abfrageintervall in
+`schedule_snapshots` gespeichert. Aktuelle Programme werden **nicht nachtraeglich
+auf unbekannte fruehere Naechte angewendet**. Fehlende, ungueltige, deaktivierte
+oder veraltete Programme verhindern eine Bewertung und werden angezeigt.
+Zeitprogramme und Nachtgrenzen beziehen sich auf **Europe/Berlin** einschliesslich
+Sommer-/Winterzeit, unabhaengig von der Browser- oder Server-Zeitzone. Diese
+Version ist fuer Anlagen mit dieser Ortszeit ausgelegt.
+
+### Berechnung
+
+- Automatische Wahl des Warmwasser-Istfuehlers: `hotWaterStorage`, dann `main`,
+  dann `dhwCylinder`. Sollwerte werden nicht als Isttemperatur ausgewertet.
+- Pro Nacht wird die laengste abgeschlossene Warmwasser-Pause im Abschnitt
+  18–10 Uhr betrachtet, mit mindestens zwei Stunden Pausendauer. Das kann bei
+  einer laengeren Pause auch nur der naechtliche Ausschnitt sein.
+- Betrachtet werden maximal die letzten 14 Naechte. Die aktuelle Nacht wird erst
+  nach Abschluss ihrer erkannten Pause bewertet.
+- Die ersten 30 Minuten nach Freigabeende und die letzten zehn Minuten vor der
+  naechsten Freigabe bleiben unberuecksichtigt. Danach sind mindestens zwei
+  Stunden Messdauer und sechs echte, unaggregierte Messwerte erforderlich.
+- Messwerte muessen bis auf 2,5 Abfrageintervalle, maximal 15 Minuten, an die
+  Auswertungsgrenzen heranreichen. Auch zwischen Messwerten bzw. beobachteten
+  Zeitprogrammen sind keine groesseren Luecken zulaessig.
+- Programmwechsel in der Pause, Temperaturanstiege ab 0,5 °C je Messschritt,
+  aufsummierte Anstiege ab 1 °C oder abrupte Abfaelle ab 2 °C je Messschritt
+  schliessen die Bewertung aus. Diese Filter koennen Stoerungen erkennen, aber
+  nicht jede Entnahme oder Nachheizung ausschliessen.
+- Temperaturabfall = erster minus letzter Messwert. Abkuehlrate = Abfall geteilt
+  durch die tatsaechlich vergangene Zeit in Stunden, auch bei Zeitumstellung.
+- Vergleich mit dem Median von mindestens drei frueheren auswertbaren Naechten,
+  deren Starttemperatur hoechstens 5 °C und Pausendauer hoechstens 25 % abweicht.
+  Als schneller/langsamer gilt eine Abweichung ueber 25 % des Medians und
+  zugleich ueber 0,2 °C/h; sonst wird der Verlauf als aehnlich beschrieben.
+
+### Grobe Einordnung und Grenzen
+
+Die folgenden Stufen sind **projektinterne Orientierung, keine Normwerte,
+Herstellervorgaben oder Hygienegrenzwerte**:
+
+| Beobachteter Temperaturabfall | Anzeige |
+|---|---|
+| bis einschliesslich 0,5 °C/h | Geringer Temperaturabfall |
+| ueber 0,5 bis einschliesslich 1,5 °C/h | Mittlerer Temperaturabfall |
+| ueber 1,5 °C/h | Staerkerer Temperaturabfall |
+
+Ein staerkerer Abfall belegt **keinen Defekt oder unnoetigen Energieverbrauch**.
+Wasserentnahme, Zirkulation und Temperaturschichtung am Fuehler beeinflussen den
+Messwert. Aus einem Fuehlerverlauf laesst sich kein zuverlaessiger Energieverlust
+des gesamten Speichers berechnen. Warmwasser-Sollwerte nicht allein anhand der
+Anzeige absenken; Anforderungen an die Trinkwasserhygiene beachten.
+
+Ob der Vorlauf zu warm ist, laesst sich aus Zeitprogramm und Vorlauftemperatur
+allein ebenfalls nicht beurteilen. Dazu sind insbesondere Raumtemperaturen,
+Aussentemperatur und Heizflaechen noetig. Die App behauptet deshalb keine
+automatische Heizkurven-Diagnose.
+
 ## Lokale Konfiguration
 
 | Variable | Standard | Bedeutung |
@@ -140,9 +204,9 @@ data/
 ```
 
 SQLite kann zusaetzlich `-wal`- und `-shm`-Dateien anlegen. Die Tabellen
-`readings`, `sensors` und `settings` enthalten die Messhistorie, Sensor-Metadaten
-und lokale Einstellungen. Messwerte sind pro Geraet, Sensor und Abrufzeitpunkt
-eindeutig.
+`readings`, `sensors`, `settings` und `schedule_snapshots` enthalten die
+Messhistorie, Sensor-Metadaten, lokale Einstellungen und beobachtete
+Zeitprogramme. Messwerte sind pro Geraet, Sensor und Abrufzeitpunkt eindeutig.
 
 `.env`, das gesamte Datenverzeichnis, Datenbankdateien und Logs werden von Git
 ausgeschlossen. Vor eigenen Commits trotzdem `git status` pruefen, besonders bei
@@ -176,6 +240,7 @@ echten Viessmann-Zugaenge. GitHub Actions fuehrt sie unter Windows und Linux aus
 | Umsetzungsplan | [PLAN.md](PLAN.md) |
 | OAuth und Viessmann-API | [src/viessmann.ts](src/viessmann.ts) |
 | Messzyklus und Demo-Daten | [src/collector.ts](src/collector.ts) |
+| Zeitprogramme und Nacht-Auswertung | [src/schedules.ts](src/schedules.ts), [src/insights.ts](src/insights.ts) |
 | SQLite und Tokenverschluesselung | [src/store.ts](src/store.ts) |
 | Lokale HTTP-Endpunkte | [src/app.ts](src/app.ts) |
 | Dashboard | [public/](public/) |

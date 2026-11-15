@@ -10,6 +10,7 @@ import { Store } from './store.ts';
 import { Viessmann } from './viessmann.ts';
 import { Collector } from './collector.ts';
 import { createApp } from './app.ts';
+import { DAYS } from './schedules.ts';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }, mock?: typeof fetch, demo = false) {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-http-'));
@@ -36,6 +37,10 @@ test('HTTP status, history validation, local-host protection and OAuth state che
   const status = await fetch(`${base}/api/status`);
   assert.equal(status.status, 200);
   assert.equal((await status.json()).connected, false);
+  const insights = await (await fetch(`${base}/api/insights`)).json();
+  assert.equal(insights.lastNight, null);
+  assert.equal(insights.schedules.length, 0);
+  assert.match(insights.message, /verbinden/);
   assert.match(status.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
   assert.equal((await fetch(`${base}/api/history?hours=1&sensor=x`)).status, 400);
   assert.equal((await fetch(`${base}/api/history?hours=24&sensor=x`)).status, 404);
@@ -90,6 +95,10 @@ test('complete OAuth callback, equipment discovery, selection and temperature re
     if (url.endsWith('/features')) return Response.json({ data: [
       { feature: 'heating.primaryCircuit.sensors.temperature.supply', properties: { value: { value: 38.5, unit: 'celsius' } } },
       { feature: 'heating.dhw.sensors.temperature.main', properties: { value: { value: 51.2, unit: 'celsius' } } },
+      { feature: 'heating.dhw.schedule', properties: {
+        active: { value: true },
+        entries: { value: Object.fromEntries(DAYS.map(day => [day, [{ start: '05:00', end: '22:00', mode: 'on' }]])) },
+      } },
     ] });
     throw new Error(`Unexpected mock request: ${url}`);
   };
@@ -117,6 +126,12 @@ test('complete OAuth callback, equipment discovery, selection and temperature re
   assert.equal(status.sensors.find((sensor: { kind: string }) => sensor.kind === 'flow').value, 38.5);
   const history = await (await fetch(`${base}/api/history?hours=24&sensor=${encodeURIComponent('heating.dhw.sensors.temperature.main:value')}`)).json();
   assert.equal(history.points[0].value, 51.2);
+  const insights = await (await fetch(`${base}/api/insights`)).json();
+  assert.equal(insights.schedules.length, 1);
+  assert.equal(insights.schedules[0].entries.mon[0].start, '05:00');
+  assert.equal(insights.timeZone, 'Europe/Berlin');
+  assert.equal(insights.sensor, 'heating.dhw.sensors.temperature.main:value');
+  assert.equal(insights.lastNight?.rate ?? null, null);
   assert.equal(calls.length, 4);
   assert.equal((await fetch(`${base}/auth/callback?state=${state}&code=valid-code`, {
     headers: { Cookie: cookie },
@@ -129,6 +144,10 @@ test('demo serves local dashboard assets and rejects live authentication', async
   const status = await (await fetch(`${base}/api/status`)).json();
   assert.equal(status.demo, true);
   assert.equal(status.sensors.length, 3);
+  const insights = await (await fetch(`${base}/api/insights`)).json();
+  assert.equal(insights.schedules.length, 2);
+  assert.ok(insights.lastNight);
+  assert.ok(['ok', 'disturbed'].includes(insights.lastNight.status));
   for (const [path, contentType] of [
     ['/', 'text/html'], ['/app.js', 'javascript'], ['/style.css', 'text/css'],
     ['/favicon.svg', 'image/svg+xml'], ['/vendor/chart.js', 'javascript'],

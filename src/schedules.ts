@@ -36,7 +36,7 @@ export function parseSchedules(features: unknown[]): Schedule[] {
     const active = record(properties.active).value;
     if (typeof active !== 'boolean') throw new Error(`Zeitprogramm ${name}: Aktivierungsstatus fehlt.`);
     const values = record(record(properties.entries).value);
-    const entries = {} as Record<Day, ScheduleEntry[]>;
+    const entries: Record<Day, ScheduleEntry[]> = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
     const occupied = new Set<number>();
     for (const [dayIndex, day] of DAYS.entries()) {
       const slots = values[day];
