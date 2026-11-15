@@ -180,6 +180,17 @@ echten Viessmann-Zugaenge. GitHub Actions fuehrt sie unter Windows und Linux aus
 | Lokale HTTP-Endpunkte | [src/app.ts](src/app.ts) |
 | Dashboard | [public/](public/) |
 
+## Lizenz
+
+Der eigene Projektcode steht unter der [MIT-Lizenz](LICENSE).
+Nutzung, Aenderung und Weitergabe sind auch kommerziell erlaubt, sofern der
+Urheberrechts- und Lizenzhinweis erhalten bleibt. Die Software wird ohne
+Gewaehrleistung bereitgestellt; massgeblich ist der Lizenztext.
+
+Abhaengigkeiten unterliegen ihren jeweiligen eigenen Lizenzen. Die MIT-Lizenz
+erteilt keine Rechte an Viessmann-Marken oder am API-Dienst und ersetzt nicht
+die Nutzungsbedingungen des API-Anbieters.
+
 ## Fehlerbehebung
 
 - **Port belegt:** `PORT` aendern, passende Redirect-URI in `.env` und im
