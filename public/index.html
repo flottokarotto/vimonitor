@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f9">
+  <meta name="description" content="Deine Viessmann-Heizung im Verlauf. Temperaturdaten lokal in SQLite.">
+  <title>ViMonitor · Deine Heizung im Verlauf</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/vendor/chart.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ViMonitor Startseite">
+      <span class="brand-icon" aria-hidden="true">v<span>ı</span></span>
+      vi<span class="brand-light">monitor</span>
+    </a>
+    <div class="topbar-right">
+      <span id="mode" class="badge">Wird geladen</span>
+      <span class="local-note"><span class="lock" aria-hidden="true">▣</span> Lokal gespeichert</span>
+    </div>
+  </header>
+  <main>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">DEIN HEIZUNGS-COCKPIT</p>
+        <h1>Wärme verstehen.<br><span>Verläufe entdecken.</span></h1>
+        <p class="subtitle">Vorlauf und Warmwasser auf einen Blick. Deine Daten bleiben bei dir.</p>
+      </div>
+      <div class="connection-summary">
+        <div class="status-line"><span id="status-dot" class="dot"></span><strong id="connection">Verbindung wird geprüft</strong></div>
+        <p id="device-name">Viessmann · ViCare API</p>
+        <button id="settings-toggle" class="text-button" aria-expanded="false" aria-controls="setup">Verbindung & Einrichtung <span aria-hidden="true">↗</span></button>
+      </div>
+    </section>
+
+    <section id="demo-notice" class="notice demo-notice" hidden>
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <div><strong>Erst einmal umschauen.</strong> Du siehst simulierte Messwerte, keine Daten deiner Heizung.
+        <button id="demo-setup" class="inline-button">Echten Zugang einrichten</button>
+      </div>
+    </section>
+    <section id="error" class="notice error-notice" role="alert" hidden></section>
+
+    <section id="setup" class="setup card" hidden>
+      <div class="section-title"><h2>Deine Heizung verbinden</h2><button id="setup-close" class="text-button">Schließen</button></div>
+      <ol>
+        <li>Im <a href="https://app.developer.viessmann-climatesolutions.com" target="_blank" rel="noreferrer">Viessmann-Developer-Portal</a> mit deinem ViCare-Konto anmelden und einen API-Client anlegen.</li>
+        <li>Redirect-URI <code id="redirect-uri">http://localhost:3000/auth/callback</code> registrieren. PKCE verwenden.</li>
+        <li>Client-ID lokal in <code>.env</code> eintragen, <code>DEMO_MODE=false</code> setzen und die App neu starten.</li>
+        <li>Hier bei Viessmann anmelden und dein Heizgerät auswählen. Das Passwort wird nur bei Viessmann eingegeben.</li>
+      </ol>
+      <div class="setup-actions">
+        <a id="login" class="button primary" href="/auth/login" hidden>Mit Viessmann verbinden ↗</a>
+        <button id="load-devices" class="button secondary" hidden>Geräteauswahl laden</button>
+      </div>
+      <form id="device-form" hidden>
+        <label for="device-select">Verfügbares Gerät</label>
+        <div class="device-controls"><select id="device-select" required></select><button class="button primary" type="submit">Gerät verwenden</button></div>
+      </form>
+      <p id="setup-message" role="status"></p>
+    </section>
+
+    <section class="overview" aria-labelledby="overview-title">
+      <div class="overview-heading">
+        <div><p class="eyebrow">TEMPERATUREN</p><h2 id="overview-title">Ein gutes Gefühl für deine Heizung.</h2></div>
+        <button id="refresh" class="button secondary refresh-button"><span aria-hidden="true">↻</span> Anzeige aktualisieren</button>
+      </div>
+      <div class="toolbar">
+        <div class="range-control" role="group" aria-label="Zeitraum">
+          <button data-hours="24" class="active" aria-pressed="true">24 Stunden</button>
+          <button data-hours="168" aria-pressed="false">7 Tage</button>
+          <button data-hours="720" aria-pressed="false">30 Tage</button>
+        </div>
+        <span id="updated" class="updated">Noch keine Messung</span>
+      </div>
+      <div class="chart-grid">
+        <article class="card chart-card flow">
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">↗</span><div><h3>Vorlauftemperatur</h3><span class="metric-description">Wärme auf dem Weg in dein Zuhause</span></div><span class="unit-tag">°C</span></div>
+          <div class="reading"><strong id="flow-value">—</strong><span>°C</span><small id="flow-age">Noch keine Daten</small></div>
+          <label class="sensor-label" for="flow-sensor">Sensor<select id="flow-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
+          <div class="chart-container"><canvas id="flow-chart" role="img" aria-label="Zeitverlauf der Vorlauftemperatur"></canvas><p id="flow-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>
+          <div id="flow-stats" class="chart-stats"><span>MIN <strong>—</strong></span><span>MAX <strong>—</strong></span><span>MESSUNGEN <strong>0</strong></span></div>
+        </article>
+        <article class="card chart-card water">
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≈</span><div><h3>Warmwassertemperatur</h3><span class="metric-description">Dein Warmwasserspeicher im Blick</span></div><span class="unit-tag">°C</span></div>
+          <div class="reading"><strong id="water-value">—</strong><span>°C</span><small id="water-age">Noch keine Daten</small></div>
+          <label class="sensor-label" for="water-sensor">Sensor<select id="water-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
+          <div class="chart-container"><canvas id="water-chart" role="img" aria-label="Zeitverlauf der Warmwassertemperatur"></canvas><p id="water-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>
+          <div id="water-stats" class="chart-stats"><span>MIN <strong>—</strong></span><span>MAX <strong>—</strong></span><span>MESSUNGEN <strong>0</strong></span></div>
+        </article>
+      </div>
+    </section>
+    <section class="details-strip" aria-label="Informationen zur Erfassung">
+      <div><span class="detail-icon" aria-hidden="true">◷</span><p><strong id="poll-label">Alle 5 Minuten</strong><span>Automatische Datenerfassung</span></p></div>
+      <div><span class="detail-icon" aria-hidden="true">▤</span><p><strong>SQLite, ganz lokal</strong><span>Deine Historie bleibt erhalten</span></p></div>
+      <div><span class="detail-icon" aria-hidden="true">✓</span><p><strong>Nur lesen, nichts steuern</strong><span>Deine Einstellungen bleiben unberührt</span></p></div>
+    </section>
+    <p class="chart-note">Lange Zeiträume zeigen zeitliche Mittelwerte. Minima und Maxima findest du im Tooltip. Messlücken werden nicht verbunden.</p>
+  </main>
+  <footer><span><strong>vimonitor</strong> <span class="footer-divider">/</span> Mehr Einblick. Weniger Rätsel.</span><a href="https://github.com/flottokarotto/vimonitor" target="_blank" rel="noreferrer">Quellcode & Anleitung ↗</a></footer>
+</body>
+</html>
