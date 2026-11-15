@@ -82,7 +82,11 @@ test('complete OAuth callback, equipment discovery, selection and temperature re
     if (url.includes('/installations?')) return Response.json({
       data: [{ id: 1, description: 'Testanlage', gateways: [{ serial: '1234' }] }],
     });
-    if (url.endsWith('/devices')) return Response.json({ data: [{ id: '0', modelId: 'Vitocal Test' }] });
+    if (url.endsWith('/devices')) return Response.json({ data: [
+      { id: '1', modelId: 'E3_TCU19_x05' },
+      { id: '2', modelId: 'E3_RoomControl_One_19_04' },
+      { id: '0', modelId: 'Vitocal Test' },
+    ] });
     if (url.endsWith('/features')) return Response.json({ data: [
       { feature: 'heating.primaryCircuit.sensors.temperature.supply', properties: { value: { value: 38.5, unit: 'celsius' } } },
       { feature: 'heating.dhw.sensors.temperature.main', properties: { value: { value: 51.2, unit: 'celsius' } } },

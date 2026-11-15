@@ -133,6 +133,7 @@ export class Viessmann {
         for (const rawDevice of await this.get(path)) {
           const device = record(rawDevice);
           if (device.id === undefined) throw new Error('Geraete-ID fehlt.');
+          if (typeof device.modelId === 'string' && /^E3_(?:TCU|RoomControl)(?:_|\d)/i.test(device.modelId)) continue;
           const installationName = typeof installation.description === 'string'
             ? installation.description : `Anlage ${String(installation.id)}`;
           const model = typeof device.modelId === 'string' ? device.modelId : `Geraet ${String(device.id)}`;

@@ -53,6 +53,8 @@ einen ungeschuetzten Reverse-Proxy ausgelegt.
    anmelden; die App verlangt kein ViCare-Passwort.
 6. Nach der Rueckleitung das gewuenschte Heizgeraet auswaehlen und **Geraet verwenden**
    anklicken. Auch bei nur einem Geraet wird die Auswahl bestaetigt.
+   Kommunikationsmodule (`E3_TCU...`) und Raumregelungsmodule
+   (`E3_RoomControl...`) werden aus der Auswahl ausgeblendet.
 
 Die App verwendet OAuth Authorization Code mit PKCE, einem einmaligen,
 cookiegebundenen State und den Scopes `IoT User offline_access`. Access-Tokens
