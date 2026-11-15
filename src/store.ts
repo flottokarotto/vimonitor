@@ -57,8 +57,12 @@ export class Store {
     if (this.key.length !== 32) throw new Error('Ungueltiger lokaler Token-Schluessel.');
     this.db = new DatabaseSync(join(directory, demo ? 'demo.sqlite' : 'vimonitor.sqlite'));
     try {
+      const journalMode = this.db.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode;
+      if (journalMode !== 'wal') {
+        throw new Error(`SQLite-WAL-Modus konnte nicht aktiviert werden (journal_mode: ${String(journalMode)}).`);
+      }
+      this.db.exec('PRAGMA foreign_keys = ON;');
       migrate(this.db);
-      this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     } catch (error) {
       this.db.close();
       throw error;

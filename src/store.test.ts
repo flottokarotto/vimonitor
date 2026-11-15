@@ -38,12 +38,29 @@ test('new live and demo databases have schema version 1 and reopen unchanged', t
       } finally { store.close(); }
       const db = new DatabaseSync(join(directory, demo ? 'demo.sqlite' : 'vimonitor.sqlite'));
       try {
+        assert.equal(db.prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal');
         assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 1);
         assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table'").get()?.n, 4);
         assert.ok(db.prepare("SELECT name FROM sqlite_schema WHERE name = 'readings_time'").get());
       } finally { db.close(); }
     }
   }
+});
+
+test('opening an existing DELETE-mode database restores WAL before use', t => {
+  const { directory, path } = fixture(t);
+  const initial = new Store(directory);
+  initial.setSetting('preserved', 'yes');
+  initial.close();
+  const db = new DatabaseSync(path);
+  try { assert.equal(db.prepare('PRAGMA journal_mode = DELETE').get()?.journal_mode, 'delete'); }
+  finally { db.close(); }
+  const store = new Store(directory);
+  try { assert.equal(store.getSetting('preserved'), 'yes'); }
+  finally { store.close(); }
+  const reopened = new DatabaseSync(path);
+  try { assert.equal(reopened.prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal'); }
+  finally { reopened.close(); }
 });
 
 for (const withSchedules of [false, true]) {
@@ -71,7 +88,10 @@ for (const withSchedules of [false, true]) {
       assert.equal(store.scheduleSnapshots(device, 0, 1800000000000).length, withSchedules ? 1 : 0);
     } finally { store.close(); }
     const migrated = new DatabaseSync(path);
-    try { assert.equal(migrated.prepare('PRAGMA user_version').get()?.user_version, 1); }
+    try {
+      assert.equal(migrated.prepare('PRAGMA user_version').get()?.user_version, 1);
+      assert.equal(migrated.prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal');
+    }
     finally { migrated.close(); }
   });
 }

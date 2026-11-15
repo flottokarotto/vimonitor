@@ -229,7 +229,11 @@ data/
   token.key           lokaler AES-256-GCM-Schluessel
 ```
 
-SQLite kann zusaetzlich `-wal`- und `-shm`-Dateien anlegen. Die Tabellen
+SQLite wird fuer Echt- und Demo-Datenbanken immer im **WAL-Modus** betrieben,
+bereits vor Schema-Migrationen. Bei jedem Oeffnen wird der Modus gesetzt und
+geprueft; kann WAL nicht aktiviert werden, bricht der Start mit einer
+Fehlermeldung ab. Dabei koennen zusaetzlich `-wal`- und `-shm`-Dateien entstehen.
+Die Tabellen
 `readings`, `sensors`, `settings` und `schedule_snapshots` enthalten die
 Messhistorie, Sensor-Metadaten, lokale Einstellungen und beobachtete
 Zeitprogramme. Messwerte sind pro Geraet, Sensor und Abrufzeitpunkt eindeutig.
