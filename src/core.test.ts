@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from './config.ts';
-import { parseTemperatures } from './model.ts';
+import { parseTemperatures, temperatureLabel } from './model.ts';
 import { Store } from './store.ts';
 import { ApiError, Viessmann } from './viessmann.ts';
 import { Collector } from './collector.ts';
@@ -46,6 +46,52 @@ test('sensor parsing distinguishes supply, water, other and disabled sensors', (
   assert.deepEqual(result.map(item => item.kind), ['flow', 'water', 'other', 'flow']);
   assert.equal(result[3]?.label, 'Vorlauf Heizkreis 1');
   assert.throws(() => parseTemperatures([null]), /Datenformat/);
+});
+
+test('friendly names distinguish measured values, targets, limits and unknown data points', () => {
+  const examples = [
+    ['heating.boiler.sensors.temperature.commonSupply', 'value', 'Gemeinsamer Heizungsvorlauf'],
+    ['heating.boiler.temperature', 'value', 'Temperaturwert des Heizkessels'],
+    ['heating.burners.0.demand.temperature', 'value', 'Angeforderte Temperatur am Brenner 1 (Sollwert)'],
+    ['heating.calculated.temperature.outside', 'value', 'Berechnete Aussentemperatur (fuer die Regelung)'],
+    ['heating.circuits.1.configuration.summerEco.absolute', 'threshold', 'Aussentemperatur-Grenze fuer Sommerbetrieb Heizkreis 2'],
+    ['heating.circuits.1.operating.programs.comfort', 'temperature', 'Gewuenschte Raumtemperatur - Komfortbetrieb (Sollwert) Heizkreis 2'],
+    ['heating.circuits.1.operating.programs.normal', 'temperature', 'Gewuenschte Raumtemperatur - Normalbetrieb (Sollwert) Heizkreis 2'],
+    ['heating.circuits.1.operating.programs.reduced', 'temperature', 'Gewuenschte Raumtemperatur - Absenkbetrieb (Sollwert) Heizkreis 2'],
+    ['heating.circuits.1.sensors.temperature.supply', 'value', 'Vorlauf Heizkreis 2'],
+    ['heating.circuits.1.temperature.levels', 'max', 'Obere Temperaturgrenze Heizkreis 2'],
+    ['heating.circuits.1.temperature.levels', 'min', 'Untere Temperaturgrenze Heizkreis 2'],
+    ['heating.circuits.1.temperature', 'value', 'Temperaturwert Heizkreis 2'],
+    ['heating.dhw.sensors.temperature.dhwCylinder', 'value', 'Warmwasserspeicher (weiterer Fuehler)'],
+    ['heating.dhw.sensors.temperature.hotWaterStorage', 'value', 'Warmwasser im Speicher'],
+    ['heating.dhw.temperature.hygiene', 'value', 'Warmwasser-Hygieneprogramm (Solltemperatur)'],
+    ['heating.dhw.temperature.main', 'value', 'Gewuenschte Warmwassertemperatur (Sollwert)'],
+    ['heating.sensors.temperature.allengra', 'value', 'Heizwasser am Durchflusssensor (Allengra)'],
+    ['heating.sensors.temperature.hydraulicSeparator', 'value', 'Heizwasser am Verteiler (hydraulische Weiche)'],
+    ['heating.sensors.temperature.outside', 'value', 'Aussentemperatur'],
+    ['heating.future.temperature', 'value', 'heating.future.temperature (value)'],
+    ['heating.sensors.temperature.outside', 'future', 'Aussentemperatur (future)'],
+  ] as const;
+  for (const [feature, property, expected] of examples) {
+    assert.equal(temperatureLabel(feature, property), expected);
+    const parsed = parseTemperatures([{
+      feature, properties: { [property]: { unit: 'celsius', value: 42 } },
+    }]);
+    assert.equal(parsed[0]?.label, expected);
+    assert.equal(parsed[0]?.sensor, `${feature}:${property}`);
+    assert.equal(parsed[0]?.value, 42);
+  }
+});
+
+test('existing readings receive friendly names without rewriting history or demo labels', t => {
+  const { store } = fixture(t);
+  const sensor = 'heating.sensors.temperature.outside:value';
+  store.saveReadings(device, 1800000000000, [{ ...temperature, sensor, label: 'old technical label', kind: 'other' }]);
+  store.saveReadings(device, 1800000000000, [{ ...temperature, sensor: 'demo.flow', label: 'Vorlauf Demo' }]);
+  const sensors = store.sensors(device);
+  assert.equal(sensors.find(row => row.sensor === sensor)?.label, 'Aussentemperatur');
+  assert.equal(sensors.find(row => row.sensor === 'demo.flow')?.label, 'Vorlauf Demo');
+  assert.equal(store.history(device, sensor, 1800000000000, 1800000000001)[0]?.value, 42);
 });
 
 test('SQLite persists values, isolates devices, deduplicates and aggregates exact extrema', t => {

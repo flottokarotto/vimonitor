@@ -25,6 +25,50 @@ export function dataArray(value: unknown): unknown[] {
   return data;
 }
 
+export function temperatureLabel(name: string, property: string): string {
+  const labels: Record<string, string> = {
+    'heating.boiler.sensors.temperature.commonSupply': 'Gemeinsamer Heizungsvorlauf',
+    'heating.boiler.sensors.temperature.main': 'Temperatur im Heizkessel',
+    'heating.boiler.temperature': 'Temperaturwert des Heizkessels',
+    'heating.calculated.temperature.outside': 'Berechnete Aussentemperatur (fuer die Regelung)',
+    'heating.dhw.sensors.temperature.main': 'Warmwasser',
+    'heating.dhw.sensors.temperature.hotWaterStorage': 'Warmwasser im Speicher',
+    'heating.dhw.sensors.temperature.dhwCylinder': 'Warmwasserspeicher (weiterer Fuehler)',
+    'heating.dhw.temperature.hygiene': 'Warmwasser-Hygieneprogramm (Solltemperatur)',
+    'heating.dhw.temperature.main': 'Gewuenschte Warmwassertemperatur (Sollwert)',
+    'heating.sensors.temperature.outside': 'Aussentemperatur',
+    'heating.sensors.temperature.hydraulicSeparator': 'Heizwasser am Verteiler (hydraulische Weiche)',
+    'heating.sensors.temperature.allengra': 'Heizwasser am Durchflusssensor (Allengra)',
+    'heating.primaryCircuit.sensors.temperature.supply': 'Vorlauf',
+  };
+  let label = labels[name];
+  if (!label) {
+    const circuit = name.match(/^heating\.circuits\.(\d+)\.(.+)$/);
+    if (circuit) {
+      const circuitLabels: Record<string, string> = {
+        'sensors.temperature.supply': 'Vorlauf',
+        'temperature': 'Temperaturwert',
+        'configuration.summerEco.absolute': 'Aussentemperatur-Grenze fuer Sommerbetrieb',
+        'operating.programs.comfort': 'Gewuenschte Raumtemperatur - Komfortbetrieb (Sollwert)',
+        'operating.programs.normal': 'Gewuenschte Raumtemperatur - Normalbetrieb (Sollwert)',
+        'operating.programs.reduced': 'Gewuenschte Raumtemperatur - Absenkbetrieb (Sollwert)',
+        'temperature.levels': property === 'min' ? 'Untere Temperaturgrenze'
+          : property === 'max' ? 'Obere Temperaturgrenze' : 'Temperaturgrenze',
+      };
+      const description = circuitLabels[circuit[2] ?? ''];
+      if (description) label = `${description} Heizkreis ${Number(circuit[1]) + 1}`;
+    }
+    const burner = name.match(/^heating\.burners\.(\d+)\.demand\.temperature$/);
+    if (burner) label = `Angeforderte Temperatur am Brenner ${Number(burner[1]) + 1} (Sollwert)`;
+  }
+  if (!label) return `${name} (${property})`;
+  if (!['value', 'temperature', 'threshold'].includes(property)
+    && !(name.endsWith('.temperature.levels') && ['min', 'max'].includes(property))) {
+    return `${label} (${property})`;
+  }
+  return label;
+}
+
 export function parseTemperatures(features: unknown[]): Temperature[] {
   const result: Temperature[] = [];
   for (const raw of features) {
@@ -38,9 +82,7 @@ export function parseTemperatures(features: unknown[]): Temperature[] {
       const kind = /heating\.(primaryCircuit|circuits\.\d+)\.sensors\.temperature\.supply$/.test(name)
         ? 'flow' : /^heating\.dhw\.sensors\.temperature\.(main|hotWaterStorage)$/.test(name)
           ? 'water' : 'other';
-      const circuit = name.match(/circuits\.(\d+)/)?.[1];
-      const label = kind === 'flow' ? `Vorlauf${circuit ? ` Heizkreis ${Number(circuit) + 1}` : ''}`
-        : kind === 'water' ? 'Warmwasser' : `${name} (${property})`;
+      const label = temperatureLabel(name, property);
       result.push({ sensor: `${name}:${property}`, label, kind, value: field.value });
     }
   }

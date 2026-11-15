@@ -81,6 +81,10 @@ der lokale Demo-Modus ist zusaetzlich im Browser geprueft.
 - Beide Diagramme bieten eine Sensorwahl. Falls kein passender Vorlauf- oder
   Warmwassersensor existiert, wird dies angezeigt. Andere Sensoren lassen sich
   ausdruecklich manuell auswaehlen; Kesseltemperatur wird nicht als Vorlauf ausgegeben.
+- Bekannte Temperaturdatenpunkte erhalten verstaendliche deutsche Namen, auch
+  fuer bereits gespeicherte Messungen. Sollwerte und Temperaturgrenzen sind
+  entsprechend gekennzeichnet. Die technische Kennung bleibt als Tooltip an der
+  Sensorwahl erhalten; unbekannte Datenpunkte behalten ihre API-Bezeichnung.
 - Vorlauf-Erkennung: `heating.primaryCircuit.sensors.temperature.supply` und
   `heating.circuits.<n>.sensors.temperature.supply`.
 - Warmwasser-Erkennung: `heating.dhw.sensors.temperature.main` und

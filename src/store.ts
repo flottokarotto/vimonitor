@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deviceKey } from './model.ts';
+import { deviceKey, temperatureLabel } from './model.ts';
 import type { Device, Temperature } from './model.ts';
 
 export class Store {
@@ -91,7 +91,12 @@ export class Store {
       WHERE s.device = ? AND r.timestamp = (
         SELECT MAX(timestamp) FROM readings WHERE device = s.device AND sensor = s.sensor
       ) ORDER BY s.sensor
-    `).all(deviceKey(device));
+    `).all(deviceKey(device)).map(row => {
+      const sensor = String(row.sensor);
+      if (!sensor.startsWith('heating.')) return row;
+      const separator = sensor.lastIndexOf(':');
+      return { ...row, label: temperatureLabel(sensor.slice(0, separator), sensor.slice(separator + 1)) };
+    });
   }
 
   history(device: Device, sensor: string, from: number, to: number) {

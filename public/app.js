@@ -27,17 +27,22 @@ function updateSensor(kind, sensors) {
   const select = $(`${kind}-sensor`);
   const previous = select.value;
   const candidates = sensors.filter(sensor => sensor.kind === kind);
+  const sensorOption = sensor => {
+    const option = new Option(sensor.label, sensor.sensor);
+    option.title = sensor.sensor;
+    return option;
+  };
   select.replaceChildren();
   if (!candidates.length) {
     select.add(new Option('Kein passender Sensor verfügbar', ''));
   } else {
-    for (const sensor of candidates) select.add(new Option(sensor.label, sensor.sensor));
+    for (const sensor of candidates) select.add(sensorOption(sensor));
   }
   const others = sensors.filter(sensor => sensor.kind !== kind);
   if (others.length) {
     const group = document.createElement('optgroup');
     group.label = 'Weitere Celsius-Sensoren (manuelle Auswahl)';
-    for (const sensor of others) group.append(new Option(sensor.label, sensor.sensor));
+    for (const sensor of others) group.append(sensorOption(sensor));
     select.append(group);
   }
   if ([...select.options].some(option => option.value === previous)) select.value = previous;
@@ -47,6 +52,7 @@ function updateSensor(kind, sensors) {
 function updateValue(kind) {
   const selected = $(`${kind}-sensor`).value;
   const sensor = state.status?.sensors.find(item => item.sensor === selected);
+  $(`${kind}-sensor`).title = sensor?.sensor ?? '';
   const manual = sensor && sensor.kind !== kind;
   $(`${kind}-title`).textContent = manual ? sensor.label : kind === 'flow' ? 'Vorlauftemperatur' : 'Warmwassertemperatur';
   $(`${kind}-description`).textContent = manual ? 'Manuell gewählter Temperatursensor'
