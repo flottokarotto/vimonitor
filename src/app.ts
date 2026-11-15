@@ -101,7 +101,8 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
     if (collector.running) throw new ApiError('Messabfrage laeuft. Bitte kurz warten.', 409);
     store.setDevice(devices[index]);
     await collector.restart();
-    res.json({ ok: true, error: collector.error });
+    if (collector.error) throw new ApiError(`Geraet ausgewaehlt, aber erste Messung fehlgeschlagen: ${collector.error}`, 502);
+    res.json({ ok: true });
   });
 
   app.get('/vendor/chart.js', (_req, res) => {
@@ -110,8 +111,12 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
   app.use(express.static(join(root, 'public'), { etag: false }));
   app.use((_req, res) => { res.status(404).json({ error: 'Nicht gefunden.' }); });
   const handleError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
-    const status = error instanceof ApiError ? error.status : 500;
-    const message = error instanceof Error ? error.message : 'Unbekannter Serverfehler.';
+    const bodyError = error instanceof Error && 'type' in error ? error.type : undefined;
+    const status = error instanceof ApiError ? error.status
+      : bodyError === 'entity.parse.failed' ? 400 : bodyError === 'entity.too.large' ? 413 : 500;
+    const message = bodyError === 'entity.parse.failed' ? 'Ungueltiges JSON.'
+      : bodyError === 'entity.too.large' ? 'Anfrage zu gross.'
+        : error instanceof Error ? error.message : 'Unbekannter Serverfehler.';
     console.error(`HTTP ${status}: ${message}`);
     res.status(status >= 400 && status <= 599 ? status : 500).json({ error: message });
   };

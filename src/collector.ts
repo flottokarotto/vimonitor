@@ -14,6 +14,8 @@ export class Collector {
   private api: Viessmann;
   private config: Config;
   private now: () => number;
+  private finished: Promise<void> = Promise.resolve();
+  private resolveFinished: (() => void) | undefined;
 
   constructor(config: Config, store: Store, api: Viessmann, now = Date.now) {
     this.config = config;
@@ -27,6 +29,7 @@ export class Collector {
   async poll() {
     if (this.running || this.stopped) return;
     this.running = true;
+    this.finished = new Promise(resolve => { this.resolveFinished = resolve; });
     let delay = this.config.pollSeconds;
     try {
       if (this.config.demo) {
@@ -49,6 +52,7 @@ export class Collector {
       if (error instanceof ApiError) delay = Math.max(delay, error.retrySeconds);
     } finally {
       this.running = false;
+      this.resolveFinished?.();
       if (!this.stopped) {
         this.nextPollAt = this.now() + delay * 1000;
         this.timer = setTimeout(() => { void this.poll(); }, delay * 1000);
@@ -69,6 +73,8 @@ export class Collector {
     this.nextPollAt = null;
     if (this.timer) clearTimeout(this.timer);
   }
+
+  async waitForIdle() { await this.finished; }
 
   private demo() {
     const device = { installationId: 'demo', gatewaySerial: 'demo', deviceId: '0', name: 'Demo-Heizung' };

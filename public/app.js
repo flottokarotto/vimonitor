@@ -46,6 +46,11 @@ function updateSensor(kind, sensors) {
 function updateValue(kind) {
   const selected = $(`${kind}-sensor`).value;
   const sensor = state.status?.sensors.find(item => item.sensor === selected);
+  const manual = sensor && sensor.kind !== kind;
+  $(`${kind}-title`).textContent = manual ? sensor.label : kind === 'flow' ? 'Vorlauftemperatur' : 'Warmwassertemperatur';
+  $(`${kind}-description`).textContent = manual ? 'Manuell gewählter Temperatursensor'
+    : kind === 'flow' ? 'Wärme auf dem Weg in dein Zuhause' : 'Dein Warmwasserspeicher im Blick';
+  $(`${kind}-chart`).setAttribute('aria-label', `Zeitverlauf: ${sensor?.label ?? (kind === 'flow' ? 'Vorlauftemperatur' : 'Warmwassertemperatur')}`);
   $(`${kind}-value`).textContent = sensor ? formatNumber.format(sensor.value) : '—';
   const age = $(`${kind}-age`);
   age.classList.remove('stale');
@@ -74,6 +79,7 @@ function renderStatus(status) {
   $('connection').textContent = status.error ? 'Erfassung gestört'
     : !status.connected ? 'Noch nicht verbunden'
       : !status.device ? 'Bitte Gerät auswählen'
+        : !latest ? 'Warte auf erste Messung'
         : stale ? 'Messwerte veraltet'
           : status.demo ? 'Demo ist bereit' : 'Mit Heizung verbunden';
   $('status-dot').className = `dot ${status.error || stale || !status.device ? 'warning' : 'good'}`;
@@ -232,18 +238,16 @@ async function initialize() {
     const button = $('device-form').querySelector('button');
     button.disabled = true;
     try {
-      const result = await api('/api/device', {
+      await api('/api/device', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ index: Number($('device-select').value) }),
       });
-      if (result.error) {
-        $('setup-message').textContent = result.error;
-      } else {
-        $('setup-message').textContent = 'Gerät ausgewählt. Die automatische Erfassung ist aktiv.';
-        setupVisible(false);
-      }
+      $('setup-message').textContent = 'Gerät ausgewählt. Die automatische Erfassung ist aktiv.';
+      setupVisible(false);
       await refresh();
     } catch (error) {
+      $('setup-message').textContent = error.message;
+      await refresh();
       showError(error.message);
     } finally { button.disabled = false; }
   });

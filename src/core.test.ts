@@ -151,6 +151,37 @@ test('429 preserves retry-after without storing fabricated readings', async t =>
   assert.equal(store.sensors(device).length, 0);
 });
 
+test('collection never overlaps and stopping waits for an in-flight write', async t => {
+  const { config, store } = fixture(t);
+  store.setDevice(device);
+  tokens(store);
+  let release: ((response: Response) => void) | undefined;
+  let requests = 0;
+  const api = new Viessmann(config, store, () => {
+    requests++;
+    return new Promise<Response>(resolve => { release = resolve; });
+  });
+  const collector = new Collector(config, store, api);
+  t.after(() => collector.stop());
+  const active = collector.start();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(collector.running, true);
+  await assert.rejects(collector.restart(), /bereits/);
+  await collector.poll();
+  assert.equal(requests, 1);
+  collector.stop();
+  assert.ok(release);
+  release(Response.json({ data: [{
+    feature: 'heating.primaryCircuit.sensors.temperature.supply',
+    properties: { value: { value: 40, unit: 'celsius' } },
+  }] }));
+  await collector.waitForIdle();
+  await active;
+  assert.equal(collector.running, false);
+  assert.equal(collector.nextPollAt, null);
+  assert.equal(store.sensors(device)[0]?.value, 40);
+});
+
 test('demo writes seven days to a separate SQLite database and survives restart', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-demo-test-'));
   const config = loadConfig({});

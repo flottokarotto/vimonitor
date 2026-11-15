@@ -23,8 +23,10 @@ server.on('error', error => {
 function shutdown() {
   collector.stop();
   server.close(() => {
-    if (!collector.running) store.close();
-    process.exitCode = 0;
+    void collector.waitForIdle().then(() => {
+      store.close();
+      process.exitCode = 0;
+    });
   });
 }
 process.once('SIGINT', shutdown);

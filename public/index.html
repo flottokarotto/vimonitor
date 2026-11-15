@@ -78,14 +78,14 @@
       </div>
       <div class="chart-grid">
         <article class="card chart-card flow">
-          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">↗</span><div><h3>Vorlauftemperatur</h3><span class="metric-description">Wärme auf dem Weg in dein Zuhause</span></div><span class="unit-tag">°C</span></div>
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">↗</span><div><h3 id="flow-title">Vorlauftemperatur</h3><span id="flow-description" class="metric-description">Wärme auf dem Weg in dein Zuhause</span></div><span class="unit-tag">°C</span></div>
           <div class="reading"><strong id="flow-value">—</strong><span>°C</span><small id="flow-age">Noch keine Daten</small></div>
           <label class="sensor-label" for="flow-sensor">Sensor<select id="flow-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
           <div class="chart-container"><canvas id="flow-chart" role="img" aria-label="Zeitverlauf der Vorlauftemperatur"></canvas><p id="flow-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>
           <div id="flow-stats" class="chart-stats"><span>MIN <strong>—</strong></span><span>MAX <strong>—</strong></span><span>MESSUNGEN <strong>0</strong></span></div>
         </article>
         <article class="card chart-card water">
-          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≈</span><div><h3>Warmwassertemperatur</h3><span class="metric-description">Dein Warmwasserspeicher im Blick</span></div><span class="unit-tag">°C</span></div>
+          <div class="metric-heading"><span class="metric-symbol" aria-hidden="true">≈</span><div><h3 id="water-title">Warmwassertemperatur</h3><span id="water-description" class="metric-description">Dein Warmwasserspeicher im Blick</span></div><span class="unit-tag">°C</span></div>
           <div class="reading"><strong id="water-value">—</strong><span>°C</span><small id="water-age">Noch keine Daten</small></div>
           <label class="sensor-label" for="water-sensor">Sensor<select id="water-sensor"><option value="">Kein Sensor verfügbar</option></select></label>
           <div class="chart-container"><canvas id="water-chart" role="img" aria-label="Zeitverlauf der Warmwassertemperatur"></canvas><p id="water-empty" class="chart-empty" hidden>Für diesen Zeitraum liegen keine Messwerte vor.</p></div>

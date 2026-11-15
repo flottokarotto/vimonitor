@@ -7,6 +7,13 @@ import type { Config } from './config.ts';
 const IDP = 'https://iam.viessmann-climatesolutions.com/idp/v3';
 const API = 'https://api.viessmann-climatesolutions.com/iot/v2';
 
+function retryAfter(response: Response): number {
+  const raw = response.headers.get('retry-after');
+  if (!raw) return 0;
+  const seconds = /^\d+$/.test(raw) ? Number(raw) : Math.ceil((Date.parse(raw) - Date.now()) / 1000);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+}
+
 export class ApiError extends Error {
   status: number;
   retrySeconds: number;
@@ -66,7 +73,7 @@ export class Viessmann {
     });
     if (!response.ok) {
       if (fields.grant_type === 'refresh_token' && [400, 401].includes(response.status)) this.store.clearSecret();
-      throw new ApiError(`Viessmann-Anmeldung fehlgeschlagen (HTTP ${response.status}). Bitte erneut verbinden.`, response.status);
+      throw new ApiError(`Viessmann-Anmeldung fehlgeschlagen (HTTP ${response.status}). Bitte erneut verbinden.`, response.status, retryAfter(response));
     }
     const data = record(await response.json());
     if (typeof data.access_token !== 'string' || typeof data.expires_in !== 'number' || data.expires_in <= 0) {
@@ -104,13 +111,9 @@ export class Viessmann {
       response = await send();
     }
     if (!response.ok) {
-      const rawRetry = response.headers.get('retry-after');
-      const retrySeconds = rawRetry
-        ? (/^\d+$/.test(rawRetry) ? Number(rawRetry) : Math.ceil((Date.parse(rawRetry) - Date.now()) / 1000))
-        : 0;
       throw new ApiError(
         `Viessmann-API: HTTP ${response.status}${response.status === 429 ? ' (Abfragelimit erreicht)' : ''}.`,
-        response.status, Number.isFinite(retrySeconds) ? Math.max(0, retrySeconds) : 0,
+        response.status, retryAfter(response),
       );
     }
     return dataArray(await response.json());
@@ -130,10 +133,13 @@ export class Viessmann {
         for (const rawDevice of await this.get(path)) {
           const device = record(rawDevice);
           if (device.id === undefined) throw new Error('Geraete-ID fehlt.');
+          const installationName = typeof installation.description === 'string'
+            ? installation.description : `Anlage ${String(installation.id)}`;
+          const model = typeof device.modelId === 'string' ? device.modelId : `Geraet ${String(device.id)}`;
           result.push({
             installationId: String(installation.id), gatewaySerial: gateway.serial,
             deviceId: String(device.id),
-            name: typeof device.modelId === 'string' ? device.modelId : `Geraet ${String(device.id)}`,
+            name: `${model} · ${installationName} · Gateway …${gateway.serial.slice(-4)}`,
           });
         }
       }
