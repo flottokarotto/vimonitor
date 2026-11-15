@@ -7,6 +7,7 @@ import type { Store } from './store.ts';
 import type { Collector } from './collector.ts';
 import { ApiError, type Viessmann } from './viessmann.ts';
 import type { Device } from './model.ts';
+import { buildInsights } from './insights.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -58,6 +59,10 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
     }
     const to = Date.now();
     res.json({ points: store.history(device, sensor, to - hours * 3600_000, to) });
+  });
+
+  app.get('/api/insights', (_req, res) => {
+    res.json(buildInsights(store, store.getDevice()));
   });
 
   app.get('/auth/login', (_req, res) => {

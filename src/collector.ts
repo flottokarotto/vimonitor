@@ -2,6 +2,8 @@ import type { Config } from './config.ts';
 import { parseTemperatures } from './model.ts';
 import type { Store } from './store.ts';
 import { ApiError, type Viessmann } from './viessmann.ts';
+import { DAYS, localParts, parseSchedules } from './schedules.ts';
+import type { Schedule } from './schedules.ts';
 
 export class Collector {
   error: string | null = null;
@@ -37,9 +39,21 @@ export class Collector {
       } else {
         const device = this.store.getDevice();
         if (device && this.api.connected()) {
-          const temperatures = parseTemperatures(await this.api.features(device));
+          const features = await this.api.features(device);
+          const temperatures = parseTemperatures(features);
           if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
-          this.store.saveReadings(device, this.now(), temperatures);
+          const timestamp = this.now();
+          this.store.saveReadings(device, timestamp, temperatures);
+          let schedules: Schedule[];
+          let scheduleError: string | null = null;
+          try {
+            schedules = parseSchedules(features);
+          } catch (error) {
+            scheduleError = error instanceof Error ? error.message : 'Zeitprogramme konnten nicht gelesen werden.';
+            console.error(`Zeitprogramme: ${scheduleError}`);
+            schedules = [];
+          }
+          this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
         }
       }
       this.error = null;
@@ -82,13 +96,29 @@ export class Collector {
     const last = this.store.sensors(device)[0]?.timestamp;
     const now = Math.floor(this.now() / 300_000) * 300_000;
     const start = typeof last === 'number' ? last + 300_000 : now - 7 * 86400_000;
+    const schedules = parseSchedules([
+      { feature: 'heating.dhw.schedule', properties: {
+        active: { value: true },
+        entries: { value: Object.fromEntries(DAYS.map(day => [day, [{ start: '05:00', end: '22:00', mode: 'on' }]])) },
+      } },
+      { feature: 'heating.circuits.0.heating.schedule', properties: {
+        active: { value: true },
+        entries: { value: Object.fromEntries(DAYS.map(day => [day, [{ start: '05:00', end: '22:30', mode: 'normal' }]])) },
+      } },
+    ]);
     for (let time = start; time <= now; time += 300_000) {
       const hour = time / 3600_000;
+      const local = localParts(time);
+      const localHour = local.hour + local.minute / 60;
+      const water = localHour >= 22 ? 52 - (localHour - 22) * 0.7
+        : localHour < 5 ? 52 - (localHour + 2) * 0.7 : 52 + 0.4 * Math.sin(hour);
       this.store.saveReadings(device, time, [
         { sensor: 'demo.flow', label: 'Vorlauf', kind: 'flow', value: 38 + 7 * Math.sin(hour / 3) + 2 * Math.sin(hour * 4) },
-        { sensor: 'demo.water', label: 'Warmwasser', kind: 'water', value: 49 + 4 * Math.sin(hour / 2) },
+        { sensor: 'demo.water', label: 'Warmwasser', kind: 'water', value: water },
         { sensor: 'demo.outside', label: 'Aussentemperatur', kind: 'other', value: 7 + 4 * Math.sin(hour / 4) },
       ]);
+      this.store.saveSchedules(device, { timestamp: time, pollSeconds: 300, schedules, error: null });
     }
+    this.store.saveSchedules(device, { timestamp: this.now(), pollSeconds: this.config.pollSeconds, schedules, error: null });
   }
 }

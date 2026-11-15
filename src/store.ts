@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deviceKey, temperatureLabel } from './model.ts';
 import type { Device, Temperature } from './model.ts';
+import type { Schedule, ScheduleSnapshot } from './schedules.ts';
 
 export class Store {
   private db: DatabaseSync;
@@ -29,6 +30,11 @@ export class Store {
         PRIMARY KEY (device, sensor, timestamp)
       );
       CREATE INDEX IF NOT EXISTS readings_time ON readings(device, timestamp);
+      CREATE TABLE IF NOT EXISTS schedule_snapshots (
+        device TEXT NOT NULL, timestamp INTEGER NOT NULL, poll_seconds INTEGER NOT NULL,
+        schedules TEXT NOT NULL, error TEXT,
+        PRIMARY KEY (device, timestamp)
+      );
     `);
   }
 
@@ -107,6 +113,30 @@ export class Store {
       FROM readings WHERE device = ? AND sensor = ? AND timestamp >= ? AND timestamp <= ?
       GROUP BY CAST(timestamp / ? AS INTEGER) ORDER BY timestamp
     `).all(bucket, bucket, deviceKey(device), sensor, from, to, bucket);
+  }
+
+  saveSchedules(device: Device, snapshot: ScheduleSnapshot) {
+    this.db.prepare('INSERT OR REPLACE INTO schedule_snapshots VALUES (?, ?, ?, ?, ?)')
+      .run(deviceKey(device), snapshot.timestamp, snapshot.pollSeconds, JSON.stringify(snapshot.schedules), snapshot.error);
+  }
+
+  scheduleSnapshots(device: Device, from: number, to: number): ScheduleSnapshot[] {
+    return this.db.prepare(`
+      SELECT timestamp, poll_seconds, schedules, error FROM schedule_snapshots
+      WHERE device = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp
+    `).all(deviceKey(device), from, to).map(row => ({
+      timestamp: Number(row.timestamp), pollSeconds: Number(row.poll_seconds),
+      schedules: JSON.parse(String(row.schedules)) as Schedule[],
+      error: row.error === null ? null : String(row.error),
+    }));
+  }
+
+  readings(device: Device, sensor: string, from: number, to: number) {
+    return this.db.prepare(`
+      SELECT timestamp, value FROM readings
+      WHERE device = ? AND sensor = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp
+    `).all(deviceKey(device), sensor, from, to)
+      .map(row => ({ timestamp: Number(row.timestamp), value: Number(row.value) }));
   }
 
   close() { this.db.close(); }
