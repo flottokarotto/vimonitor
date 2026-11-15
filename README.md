@@ -97,6 +97,15 @@ der lokale Demo-Modus ist zusaetzlich im Browser geprueft.
   auch Minimum, Maximum und Messanzahl. Messluecken werden nicht interpoliert.
 - Y-Achsen zeigen gerundete Celsius-Werte mit hoechstens einer Nachkommastelle
   und deutschem Dezimalkomma; die gespeicherten Messwerte bleiben unveraendert.
+- Im dritten Diagramm **Temperaturen vergleichen** lassen sich beliebige
+  Temperaturdatenpunkte per Checkbox gemeinsam anzeigen, einschliesslich
+  Sollwerten und Grenzwerten. Standardmaessig sind Vorlauf und Warmwasser
+  ausgewaehlt. Alle Diagramme verwenden den oben gewaehlten Zeitraum.
+  Farben (bei vielen Linien zusaetzlich Strichmuster) unterscheiden die
+  Verlaeufe; der Tooltip nennt den Datenpunkt. Die Auswahl bleibt beim
+  automatischen Aktualisieren erhalten, wird beim Neuladen zurueckgesetzt.
+  Identische Historien werden pro Aktualisierung nur einmal lokal abgefragt;
+  es entstehen keine zusaetzlichen Viessmann-API-Abfragen.
 - Abfragen laufen nicht parallel. Fehler erzeugen keine Ersatzmesswerte.
   Wiederholungsversuche erfolgen mit wachsender Pause bis zu einer Stunde;
   ein laengeres `Retry-After` der API wird ebenfalls beachtet.

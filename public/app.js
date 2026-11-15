@@ -4,7 +4,40 @@ const formatNumber = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, 
 const formatAxis = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, signDisplay: 'negative' });
 const formatTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 const formatDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false };
+const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false, comparison: new Set(), comparisonInitialized: false };
+const lineColors = ['#e6744a', '#279c9d', '#7961b5', '#b08624', '#3277bd', '#c64e83', '#628c3c', '#64748b'];
+
+function updateComparisonSensors(sensors) {
+  const available = new Set(sensors.map(sensor => sensor.sensor));
+  state.comparison = new Set([...state.comparison].filter(sensor => available.has(sensor)));
+  if (!state.comparisonInitialized && sensors.length) {
+    for (const kind of ['flow', 'water']) {
+      const sensor = sensors.find(item => item.kind === kind);
+      if (sensor) state.comparison.add(sensor.sensor);
+    }
+    state.comparisonInitialized = true;
+  }
+  const picker = $('compare-sensors');
+  picker.replaceChildren();
+  for (const [index, sensor] of sensors.entries()) {
+    const label = document.createElement('label');
+    label.className = `compare-choice color-${index % lineColors.length}${index >= lineColors.length ? (index >= lineColors.length * 2 ? ' dotted' : ' dashed') : ''}`;
+    label.title = sensor.sensor;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = sensor.sensor;
+    input.checked = state.comparison.has(sensor.sensor);
+    input.addEventListener('change', () => {
+      if (input.checked) state.comparison.add(sensor.sensor);
+      else state.comparison.delete(sensor.sensor);
+      void loadHistories();
+    });
+    const text = document.createElement('span');
+    text.textContent = sensor.label;
+    label.append(input, text);
+    picker.append(label);
+  }
+}
 
 function showError(message) {
   $('error').textContent = message;
@@ -93,6 +126,7 @@ function renderStatus(status) {
   $('updated').textContent = latest ? `Letzte Messung: ${formatDate.format(latest)}` : 'Noch keine Messung';
   showError(status.error ?? '');
   for (const kind of ['flow', 'water']) updateSensor(kind, status.sensors);
+  updateComparisonSensors(status.sensors);
   if (!status.demo && (!status.connected || !status.device)) setupVisible(true);
 }
 
@@ -117,7 +151,7 @@ function createChart(kind) {
             label: context => {
               const point = context.raw;
               if (point.y === null) return 'Keine Messung';
-              const lines = [`${formatNumber.format(point.y)} °C`];
+              const lines = [`${kind === 'compare' ? `${context.dataset.label}: ` : ''}${formatNumber.format(point.y)} °C`];
               if (point.count > 1) lines.push(`Min ${formatNumber.format(point.min)} · Max ${formatNumber.format(point.max)} °C`, `${point.count} Messungen`);
               return lines;
             },
@@ -139,8 +173,7 @@ function createChart(kind) {
   });
 }
 
-function renderHistory(kind, points) {
-  const chart = state.charts[kind];
+function historyData(points) {
   const data = [];
   const bucket = Math.max(300_000, Math.ceil(state.hours * 3600_000 / 600));
   let previous;
@@ -151,11 +184,39 @@ function renderHistory(kind, points) {
     data.push({ x: point.timestamp, y: point.value, min: point.min, max: point.max, count: point.count });
     previous = point.timestamp;
   }
+  return data;
+}
+
+function updateChart(chart) {
   const now = Date.now();
   chart.options.scales.x.min = now - state.hours * 3600_000;
   chart.options.scales.x.max = now;
-  chart.data.datasets[0].data = data;
   chart.update();
+}
+
+function renderComparison(histories) {
+  const chart = state.charts.compare;
+  const selected = state.status.sensors.filter(sensor => state.comparison.has(sensor.sensor));
+  chart.data.datasets = selected.map(sensor => {
+    const index = state.status.sensors.indexOf(sensor);
+    return {
+      label: sensor.label, data: historyData(histories.get(sensor.sensor) ?? []),
+      borderColor: lineColors[index % lineColors.length],
+      borderDash: index >= lineColors.length ? (index >= lineColors.length * 2 ? [2, 3] : [7, 4]) : [],
+      fill: false, tension: 0.22, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false,
+    };
+  });
+  updateChart(chart);
+  const empty = selected.filter(sensor => !histories.get(sensor.sensor)?.length);
+  $('compare-empty').hidden = selected.length > 0 && empty.length !== selected.length;
+  $('compare-empty').textContent = selected.length ? 'Für diesen Zeitraum liegen keine Messwerte vor.' : 'Bitte mindestens eine Temperatur auswählen.';
+  $('compare-summary').textContent = `${selected.length} von ${state.status.sensors.length} Temperaturen ausgewählt${empty.length ? ` · Keine Messwerte: ${empty.map(sensor => sensor.label).join(', ')}` : ''}`;
+}
+
+function renderHistory(kind, points) {
+  const chart = state.charts[kind];
+  chart.data.datasets[0].data = historyData(points);
+  updateChart(chart);
   $(`${kind}-empty`).hidden = points.length > 0;
   const stats = $(`${kind}-stats`).querySelectorAll('strong');
   stats[0].textContent = points.length ? `${formatNumber.format(Math.min(...points.map(point => point.min)))} °C` : '—';
@@ -166,16 +227,20 @@ function renderHistory(kind, points) {
 async function loadHistories() {
   const version = ++state.request;
   try {
-    const results = await Promise.all(['flow', 'water'].map(async kind => {
-      const sensor = $(`${kind}-sensor`).value;
-      const data = sensor ? await api(`/api/history?hours=${state.hours}&sensor=${encodeURIComponent(sensor)}`) : { points: [] };
-      return { kind, points: data.points };
+    const sensors = new Set([...state.comparison, ...['flow', 'water'].map(kind => $(`${kind}-sensor`).value)]);
+    sensors.delete('');
+    const results = await Promise.all([...sensors].map(async sensor => {
+      const data = await api(`/api/history?hours=${state.hours}&sensor=${encodeURIComponent(sensor)}`);
+      return [sensor, data.points];
     }));
     if (version !== state.request) return;
-    for (const result of results) renderHistory(result.kind, result.points);
+    const histories = new Map(results);
+    for (const kind of ['flow', 'water']) renderHistory(kind, histories.get($(`${kind}-sensor`).value) ?? []);
+    renderComparison(histories);
   } catch (error) {
     if (version === state.request) {
       for (const kind of ['flow', 'water']) renderHistory(kind, []);
+      renderComparison(new Map());
       showError(`Verlauf konnte nicht geladen werden: ${error.message}`);
     }
   }
@@ -240,6 +305,10 @@ async function initialize() {
     state.charts[kind] = createChart(kind);
     $(`${kind}-sensor`).addEventListener('change', () => { updateValue(kind); void loadHistories(); });
   }
+  state.charts.compare = createChart('compare');
+  state.charts.compare.data.datasets = [];
+  state.charts.compare.options.normalized = false;
+  state.charts.compare.options.plugins.tooltip.displayColors = true;
   $('device-form').addEventListener('submit', async event => {
     event.preventDefault();
     const button = $('device-form').querySelector('button');
