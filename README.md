@@ -5,9 +5,35 @@ Warmwasser und weitere verfuegbare Celsius-Sensoren**, dauerhaft in SQLite
 gespeichert. Deutsches Dashboard mit Sensorwahl, 24-Stunden-, 7-Tage- und
 30-Tage-Ansicht.
 
+**Version 1.0.0** · [Release und Quellcode herunterladen](https://github.com/flottokarotto/vimonitor/releases/tag/v1.0.0)
+
 > Die App startet standardmaessig im deutlich gekennzeichneten **Demo-Modus**.
 > Echte Messwerte gibt es erst nach Einrichtung eines eigenen Viessmann-API-Clients.
 > ViMonitor ist ein unabhaengiges Projekt, kein offizielles Viessmann-Produkt.
+
+## Screenshots
+
+Alle Aufnahmen zeigen ausschliesslich synthetische Demodaten, keine Messwerte
+oder Zugangsdaten einer echten Anlage.
+
+### Automatische Nacht-Auswertung und Zeitprogramme
+
+Temperaturabfall pro Stunde, grobe Einordnung und eingestellte Heiz- und
+Warmwasserzeiten ohne zusaetzliche Konfiguration.
+
+![Dashboard mit automatischer Warmwasser-Abkuehlung und Zeitprogrammen im Demo-Modus](docs/screenshots/dashboard.png)
+
+### Vorlauf und Warmwasser
+
+Einzelne Temperaturverlaeufe mit Sensorwahl, Zeitraum und Messwert-Uebersicht.
+
+![24-Stunden-Verlaeufe fuer Vorlauf und Warmwasser mit synthetischen Messwerten](docs/screenshots/temperature-history.png)
+
+### Mehrere Temperaturen vergleichen
+
+Ausgewaehlte Sensoren gemeinsam auf einer Celsius-Achse.
+
+![Vergleich von Vorlauf, Aussentemperatur und Warmwasser mit synthetischen Messwerten](docs/screenshots/comparison.png)
 
 ## Schnellstart unter Windows
 
