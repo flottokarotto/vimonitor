@@ -91,6 +91,8 @@ der lokale Demo-Modus ist zusaetzlich im Browser geprueft.
   Browser-Zeitzone; sie sind keine vom Sensor bestaetigten Messzeitpunkte.
 - Maximal 601 Zeitbloecke pro Diagramm. Angezeigt werden Mittelwerte, im Tooltip
   auch Minimum, Maximum und Messanzahl. Messluecken werden nicht interpoliert.
+- Y-Achsen zeigen gerundete Celsius-Werte mit hoechstens einer Nachkommastelle
+  und deutschem Dezimalkomma; die gespeicherten Messwerte bleiben unveraendert.
 - Abfragen laufen nicht parallel. Fehler erzeugen keine Ersatzmesswerte.
   Wiederholungsversuche erfolgen mit wachsender Pause bis zu einer Stunde;
   ein laengeres `Retry-After` der API wird ebenfalls beachtet.

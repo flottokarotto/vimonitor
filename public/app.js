@@ -1,6 +1,7 @@
 /* global Chart */
 const $ = id => document.getElementById(id);
 const formatNumber = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const formatAxis = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, signDisplay: 'negative' });
 const formatTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 const formatDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false };
@@ -125,7 +126,7 @@ function createChart(kind) {
         },
         y: {
           grace: '18%', border: { display: false }, grid: { color: '#f0f2f4', drawTicks: false },
-          ticks: { maxTicksLimit: 5, padding: 12, color: '#a0a9b2', font: { size: 10 }, callback: value => `${value}°` },
+          ticks: { precision: 1, maxTicksLimit: 5, padding: 12, color: '#a0a9b2', font: { size: 10 }, callback: value => `${formatAxis.format(Number(value))}°` },
         },
       },
     },
