@@ -234,6 +234,17 @@ SQLite kann zusaetzlich `-wal`- und `-shm`-Dateien anlegen. Die Tabellen
 Messhistorie, Sensor-Metadaten, lokale Einstellungen und beobachtete
 Zeitprogramme. Messwerte sind pro Geraet, Sensor und Abrufzeitpunkt eindeutig.
 
+Die Schema-Version steht in SQLite unter `PRAGMA user_version` (aktuell **1**),
+unabhaengig von der App-Version. Beim Start werden ausstehende Migrationen in
+einer gemeinsamen Transaktion angewendet. Bisherige unversionierte Datenbanken
+(Version 0), auch ohne `schedule_snapshots`, werden automatisch und ohne Loeschen
+vorhandener Daten uebernommen. Bei Fehlern werden Schema-Aenderungen und
+Versionsnummer gemeinsam zurueckgerollt; neuere, nicht unterstuetzte
+Schema-Versionen verhindern den Start mit einer Fehlermeldung. Das gilt fuer
+Echt- und Demo-Datenbanken. Vor Updates das Datenverzeichnis bei beendeter App
+sichern. Kuenftige Schema-Aenderungen werden als weitere Migration am Ende von
+`migrations` in `src/store.ts` ergaenzt; bestehende Migrationen bleiben unveraendert.
+
 `.env`, das gesamte Datenverzeichnis, Datenbankdateien und Logs werden von Git
 ausgeschlossen. Vor eigenen Commits trotzdem `git status` pruefen, besonders bei
 einem benutzerdefinierten `DATA_DIR`. **Keine Datenbank, Tokens, Schluessel,

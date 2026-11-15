@@ -6,6 +6,45 @@ import { deviceKey, temperatureLabel } from './model.ts';
 import type { Device, Temperature } from './model.ts';
 import type { Schedule, ScheduleSnapshot } from './schedules.ts';
 
+const migrations = [
+  `
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS sensors (
+      device TEXT NOT NULL, sensor TEXT NOT NULL, label TEXT NOT NULL, kind TEXT NOT NULL,
+      PRIMARY KEY (device, sensor)
+    );
+    CREATE TABLE IF NOT EXISTS readings (
+      device TEXT NOT NULL, sensor TEXT NOT NULL, timestamp INTEGER NOT NULL, value REAL NOT NULL,
+      PRIMARY KEY (device, sensor, timestamp)
+    );
+    CREATE INDEX IF NOT EXISTS readings_time ON readings(device, timestamp);
+    CREATE TABLE IF NOT EXISTS schedule_snapshots (
+      device TEXT NOT NULL, timestamp INTEGER NOT NULL, poll_seconds INTEGER NOT NULL,
+      schedules TEXT NOT NULL, error TEXT,
+      PRIMARY KEY (device, timestamp)
+    );
+  `,
+];
+
+function migrate(db: DatabaseSync) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+    if (!Number.isInteger(version) || version < 0 || version > migrations.length) {
+      throw new Error(`Nicht unterstuetzte Datenbank-Schema-Version ${version}; diese App unterstuetzt bis ${migrations.length}. Bitte eine passende App-Version verwenden.`);
+    }
+    for (const [index, migration] of migrations.entries()) {
+      if (index < version) continue;
+      db.exec(migration);
+      db.exec(`PRAGMA user_version = ${index + 1}`);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export class Store {
   private db: DatabaseSync;
   private key: Buffer;
@@ -17,25 +56,13 @@ export class Store {
     this.key = readFileSync(keyPath);
     if (this.key.length !== 32) throw new Error('Ungueltiger lokaler Token-Schluessel.');
     this.db = new DatabaseSync(join(directory, demo ? 'demo.sqlite' : 'vimonitor.sqlite'));
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS sensors (
-        device TEXT NOT NULL, sensor TEXT NOT NULL, label TEXT NOT NULL, kind TEXT NOT NULL,
-        PRIMARY KEY (device, sensor)
-      );
-      CREATE TABLE IF NOT EXISTS readings (
-        device TEXT NOT NULL, sensor TEXT NOT NULL, timestamp INTEGER NOT NULL, value REAL NOT NULL,
-        PRIMARY KEY (device, sensor, timestamp)
-      );
-      CREATE INDEX IF NOT EXISTS readings_time ON readings(device, timestamp);
-      CREATE TABLE IF NOT EXISTS schedule_snapshots (
-        device TEXT NOT NULL, timestamp INTEGER NOT NULL, poll_seconds INTEGER NOT NULL,
-        schedules TEXT NOT NULL, error TEXT,
-        PRIMARY KEY (device, timestamp)
-      );
-    `);
+    try {
+      migrate(this.db);
+      this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   getSetting(key: string): string | undefined {
