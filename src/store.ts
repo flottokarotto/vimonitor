@@ -84,7 +84,27 @@ export class Store {
   }
 
   setDevice(device: Device) { this.setSetting('device', JSON.stringify(device)); }
-  clearDevice() { this.db.prepare("DELETE FROM settings WHERE key = 'device'").run(); }
+  getDevices(): Device[] {
+    const value = this.getSetting('devices');
+    if (value !== undefined) return JSON.parse(value) as Device[];
+    const device = this.getDevice();
+    return device ? [device] : [];
+  }
+  setDevices(devices: Device[]) {
+    this.db.exec('BEGIN');
+    try {
+      this.setSetting('devices', JSON.stringify(devices));
+      const current = this.getDevice();
+      const active = devices.find(device => current && deviceKey(device) === deviceKey(current)) ?? devices[0];
+      if (active) this.setDevice(active);
+      else this.db.prepare("DELETE FROM settings WHERE key = 'device'").run();
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  clearDevice() { this.db.prepare("DELETE FROM settings WHERE key IN ('device', 'devices')").run(); }
 
   saveSecret(value: unknown) {
     const iv = randomBytes(12);

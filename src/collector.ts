@@ -37,24 +37,37 @@ export class Collector {
       if (this.config.demo) {
         this.demo();
       } else {
-        const device = this.store.getDevice();
-        if (device && this.api.connected()) {
-          const features = await this.api.features(device);
-          const temperatures = parseTemperatures(features);
-          if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
-          const timestamp = this.now();
-          this.store.saveReadings(device, timestamp, temperatures);
-          let schedules: Schedule[];
-          let scheduleError: string | null = null;
-          try {
-            schedules = parseSchedules(features);
-          } catch (error) {
-            scheduleError = error instanceof Error ? error.message : 'Zeitprogramme konnten nicht gelesen werden.';
-            console.error(`Zeitprogramme: ${scheduleError}`);
-            schedules = [];
+        const failures: string[] = [];
+        let retrySeconds = 0;
+        if (this.api.connected()) {
+          for (const device of this.store.getDevices()) {
+            try {
+              const features = await this.api.features(device);
+              const temperatures = parseTemperatures(features);
+              if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
+              const timestamp = this.now();
+              this.store.saveReadings(device, timestamp, temperatures);
+              let schedules: Schedule[];
+              let scheduleError: string | null = null;
+              try {
+                schedules = parseSchedules(features);
+              } catch (error) {
+                scheduleError = error instanceof Error ? error.message : 'Zeitprogramme konnten nicht gelesen werden.';
+                console.error(`Zeitprogramme: ${scheduleError}`);
+                schedules = [];
+              }
+              this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
+              failures.push(`${device.name}: ${message}`);
+              if (error instanceof ApiError && (error.status === 429 || error.status === 401)) {
+                retrySeconds = error.retrySeconds;
+                break;
+              }
+            }
           }
-          this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
         }
+        if (failures.length) throw new ApiError(failures.join(' | '), 502, retrySeconds);
       }
       this.error = null;
       this.failures = 0;

@@ -77,7 +77,7 @@ einen ungeschuetzten Reverse-Proxy ausgelegt.
 5. App neu starten. Im Dashboard unter **Verbindung & Einrichtung** auf
    **Mit Viessmann verbinden** klicken. Ausschliesslich auf der Viessmann-Seite
    anmelden; die App verlangt kein ViCare-Passwort.
-6. Nach der Rueckleitung das gewuenschte Heizgeraet auswaehlen und **Geraet verwenden**
+6. Nach der Rueckleitung ein oder mehrere Heizgeraete auswaehlen und **Auswahl speichern**
    anklicken. Auch bei nur einem Geraet wird die Auswahl bestaetigt.
    Kommunikationsmodule (`E3_TCU...`) und Raumregelungsmodule
    (`E3_RoomControl...`) werden aus der Auswahl ausgeblendet.
@@ -101,7 +101,15 @@ simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
 ## Dashboard und Erfassung
 
 - Automatische Messabfrage alle **fuenf Minuten**. Das sind 288 regulaere
-  Feature-Abfragen am Tag, zuzueglich Anmeldung und Geraeteerkennung.
+  Feature-Abfragen **pro ausgewaehltem Heizgeraet** am Tag, zuzueglich Anmeldung
+  und Geraeteerkennung. Mehrere Geraete erhoehen den API-Verbrauch entsprechend;
+  das eigene API-Kontingent und etwaige Kosten beachten.
+- Mehrere Heizgeraete desselben ViCare-Kontos koennen gleichzeitig erfasst
+  werden. In der Einzelansicht und Nacht-Auswertung bestimmt die Heizungsauswahl
+  das angezeigte Geraet; im Vergleichsdiagramm lassen sich Sensoren aller
+  ausgewaehlten Heizungen gemeinsam darstellen. Bei einer Abfragebegrenzung
+  wird die Erfassung pausiert und der Fehler angezeigt; bei sonstigen
+  Geraetefehlern werden die uebrigen Heizungen weiter abgefragt.
 - **Anzeige aktualisieren** liest nur die lokale Datenbank und verbraucht kein
   zusaetzliches Viessmann-Messkontingent.
 - Beide Diagramme bieten eine Sensorwahl. Falls kein passender Vorlauf- oder

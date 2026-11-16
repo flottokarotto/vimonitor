@@ -32,6 +32,9 @@
       <div class="connection-summary">
         <div class="status-line"><span id="status-dot" class="dot"></span><strong id="connection">Verbindung wird geprüft</strong></div>
         <p id="device-name">Viessmann · ViCare API</p>
+        <label id="active-device-label" class="sensor-label" hidden>Heizung für Einzelansicht und Auswertung
+          <select id="active-device"></select>
+        </label>
         <button id="settings-toggle" class="text-button" aria-expanded="false" aria-controls="setup">Verbindung & Einrichtung <span aria-hidden="true">↗</span></button>
       </div>
     </section>
@@ -50,15 +53,16 @@
         <li>Im <a href="https://app.developer.viessmann-climatesolutions.com" target="_blank" rel="noreferrer">Viessmann-Developer-Portal</a> mit deinem ViCare-Konto anmelden und einen API-Client anlegen.</li>
         <li>Redirect-URI <code id="redirect-uri">http://localhost:3000/auth/callback</code> registrieren. PKCE verwenden.</li>
         <li>Client-ID lokal in <code>.env</code> eintragen, <code>DEMO_MODE=false</code> setzen und die App neu starten.</li>
-        <li>Hier bei Viessmann anmelden und dein Heizgerät auswählen. Das Passwort wird nur bei Viessmann eingegeben.</li>
+        <li>Hier bei Viessmann anmelden und deine Heizgeräte auswählen. Das Passwort wird nur bei Viessmann eingegeben.</li>
       </ol>
       <div class="setup-actions">
         <a id="login" class="button primary" href="/auth/login" hidden>Mit Viessmann verbinden ↗</a>
         <button id="load-devices" class="button secondary" hidden>Geräteauswahl laden</button>
       </div>
       <form id="device-form" hidden>
-        <label for="device-select">Verfügbares Gerät</label>
-        <div class="device-controls"><select id="device-select" required></select><button class="button primary" type="submit">Gerät verwenden</button></div>
+        <fieldset><legend>Heizgeräte für die automatische Erfassung</legend><div id="device-options"></div></fieldset>
+        <button class="button primary" type="submit">Auswahl speichern</button>
+        <p>Jede Heizung benötigt eine eigene API-Abfrage pro Intervall. Bitte das API-Kontingent beachten.</p>
       </form>
       <p id="setup-message" role="status"></p>
     </section>

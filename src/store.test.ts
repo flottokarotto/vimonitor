@@ -8,6 +8,7 @@ import { Store } from './store.ts';
 import { deviceKey } from './model.ts';
 
 const device = { installationId: '1', gatewaySerial: '2', deviceId: '0', name: 'Test' };
+const secondDevice = { installationId: '2', gatewaySerial: '3', deviceId: '0', name: 'Second' };
 const legacySchema = `
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE sensors (
@@ -26,6 +27,27 @@ function fixture(t: { after: (fn: () => void) => void }) {
   t.after(() => rmSync(directory, { recursive: true }));
   return { directory, path: join(directory, 'vimonitor.sqlite') };
 }
+
+test('legacy single selection becomes a multi-selection without losing the active device or history', t => {
+  const { directory } = fixture(t);
+  let store = new Store(directory);
+  store.setDevice(device);
+  store.saveReadings(device, 1000, [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 }]);
+  assert.deepEqual(store.getDevices(), [device]);
+  store.setDevices([secondDevice, device]);
+  assert.deepEqual(store.getDevice(), device);
+  store.close();
+  store = new Store(directory);
+  try {
+    assert.deepEqual(store.getDevices(), [secondDevice, device]);
+    assert.deepEqual(store.getDevice(), device);
+    assert.equal(store.readings(device, 'flow', 0, 2000)[0]?.value, 42);
+    store.setDevices([secondDevice]);
+    assert.deepEqual(store.getDevice(), secondDevice);
+    store.clearDevice();
+    assert.deepEqual(store.getDevices(), []);
+  } finally { store.close(); }
+});
 
 test('new live and demo databases have schema version 1 and reopen unchanged', t => {
   const { directory } = fixture(t);

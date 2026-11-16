@@ -138,6 +138,67 @@ test('complete OAuth callback, equipment discovery, selection and temperature re
   })).status, 400);
 });
 
+test('multiple heaters collect independently and expose device-specific history', async t => {
+  const calls: string[] = [];
+  let failure: 'none' | 'server' | 'limit' = 'none';
+  const mock: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('/installations?')) return Response.json({ data: [
+      { id: 1, description: 'Haus A', gateways: [{ serial: '1234' }] },
+      { id: 2, description: 'Haus B', gateways: [{ serial: '5678' }] },
+    ] });
+    if (url.endsWith('/devices')) return Response.json({ data: [{ id: '0', modelId: 'Vitodens' }] });
+    if (url.endsWith('/features')) {
+      if (failure !== 'none' && url.includes('/installations/1/')) {
+        return new Response('', { status: failure === 'limit' ? 429 : 500, headers: { 'Retry-After': '1800' } });
+      }
+      return Response.json({ data: [{
+        feature: 'heating.primaryCircuit.sensors.temperature.supply',
+        properties: { value: { value: url.includes('/installations/1/') ? 38 : 51, unit: 'celsius' } },
+      }] });
+    }
+    throw new Error(`Unexpected mock request: ${url}`);
+  };
+  const { base, store, collector } = await fixture(t, mock);
+  store.saveSecret({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3600_000 });
+  const headers = { Origin: base, 'Content-Type': 'application/json' };
+  const post = (path: string, value: unknown) => fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(value) });
+  const discovered = await (await fetch(`${base}/api/devices`)).json();
+  assert.equal(discovered.devices.length, 2);
+  assert.equal((await post('/api/devices', { indexes: [] })).status, 400);
+  assert.equal((await post('/api/devices', { indexes: [0, 0] })).status, 400);
+  assert.equal((await post('/api/devices', { indexes: [0, 2] })).status, 400);
+  assert.equal((await post('/api/devices', { indexes: [0, 1] })).status, 200);
+  const status = await (await fetch(`${base}/api/status`)).json();
+  assert.equal(status.devices.length, 2);
+  assert.deepEqual(status.devices.map((item: { sensors: { value: number }[] }) => item.sensors[0]?.value), [38, 51]);
+  assert.equal(status.sensors[0].value, 38);
+  const sensor = encodeURIComponent('heating.primaryCircuit.sensors.temperature.supply:value');
+  for (const [index, expected] of [38, 51].entries()) {
+    const history = await (await fetch(`${base}/api/history?hours=24&sensor=${sensor}&device=${encodeURIComponent(status.devices[index].id)}`)).json();
+    assert.equal(history.points[0].value, expected);
+  }
+  assert.equal((await fetch(`${base}/api/history?hours=24&sensor=${sensor}&device=missing`)).status, 404);
+  assert.equal((await post('/api/active-device', { id: status.devices[1].id })).status, 200);
+  assert.equal((await (await fetch(`${base}/api/status`)).json()).sensors[0].value, 51);
+  assert.equal((await (await fetch(`${base}/api/history?hours=24&sensor=${sensor}`)).json()).points[0].value, 51);
+  assert.equal((await post('/api/active-device', { id: 'missing' })).status, 400);
+  assert.equal((await (await fetch(`${base}/api/devices`)).json()).devices.filter((device: { selected: boolean }) => device.selected).length, 2);
+  failure = 'server';
+  const before = calls.length;
+  await collector.restart();
+  assert.match(collector.error ?? '', /Haus A.*HTTP 500/);
+  assert.equal(calls.slice(before).filter(url => url.endsWith('/features')).length, 2);
+  assert.equal((await (await fetch(`${base}/api/status`)).json()).devices[1].sensors[0].value, 51);
+  failure = 'limit';
+  const beforeLimit = calls.length;
+  await collector.restart();
+  assert.match(collector.error ?? '', /Abfragelimit/);
+  assert.equal(calls.slice(beforeLimit).filter(url => url.endsWith('/features')).length, 1);
+  assert.ok((collector.nextPollAt ?? 0) >= Date.now() + 1790_000);
+});
+
 test('demo serves local dashboard assets and rejects live authentication', async t => {
   const { base, collector } = await fixture(t, undefined, true);
   await collector.start();

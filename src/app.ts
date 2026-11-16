@@ -7,6 +7,7 @@ import type { Store } from './store.ts';
 import type { Collector } from './collector.ts';
 import { ApiError, type Viessmann } from './viessmann.ts';
 import type { Device } from './model.ts';
+import { deviceKey } from './model.ts';
 import { buildInsights } from './insights.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -44,6 +45,10 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
       sensors: device ? store.sensors(device) : [],
       error: collector.error, nextPollAt: collector.nextPollAt,
       pollSeconds: config.pollSeconds, collecting: collector.running,
+      devices: store.getDevices().map(item => ({
+        id: deviceKey(item), name: item.name, sensors: store.sensors(item),
+      })),
+      activeDevice: device ? deviceKey(device) : null,
     });
   });
 
@@ -53,7 +58,9 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
     if (![24, 168, 720].includes(hours) || typeof sensor !== 'string' || sensor.length > 256) {
       throw new ApiError('Ungueltiger Zeitraum oder Sensor.', 400);
     }
-    const device = store.getDevice();
+    const requested = req.query.device;
+    if (requested !== undefined && typeof requested !== 'string') throw new ApiError('Ungueltige Geraeteauswahl.', 400);
+    const device = requested === undefined ? store.getDevice() : store.getDevices().find(item => deviceKey(item) === requested);
     if (!device || !store.sensors(device).some(item => item.sensor === sensor)) {
       throw new ApiError('Sensor nicht vorhanden. Zuerst ein Geraet verbinden.', 404);
     }
@@ -95,7 +102,30 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
   app.get('/api/devices', async (_req, res) => {
     if (config.demo) throw new ApiError('Geraeteauswahl ist im Demo-Modus deaktiviert.', 400);
     devices = await api.devices();
-    res.json({ devices: devices.map((device, index) => ({ index, name: device.name, deviceId: device.deviceId })) });
+    const selected = new Set(store.getDevices().map(deviceKey));
+    res.json({ devices: devices.map((device, index) => ({ index, name: device.name, deviceId: device.deviceId, selected: selected.has(deviceKey(device)) })) });
+  });
+
+  app.post('/api/devices', async (req, res) => {
+    const indexes: unknown = req.body?.indexes;
+    if (config.demo || !Array.isArray(indexes) || !indexes.length
+      || indexes.some(index => typeof index !== 'number' || !Number.isInteger(index) || !devices[index])
+      || new Set(indexes).size !== indexes.length) {
+      throw new ApiError('Ungueltige Geraeteauswahl. Bitte Geraeteliste neu laden und mindestens ein Geraet auswaehlen.', 400);
+    }
+    if (collector.running) throw new ApiError('Messabfrage laeuft. Bitte kurz warten.', 409);
+    store.setDevices(indexes.map(index => devices[index]!));
+    await collector.restart();
+    if (collector.error) throw new ApiError(`Auswahl gespeichert, aber Messung fehlgeschlagen: ${collector.error}`, 502);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/active-device', (req, res) => {
+    const id: unknown = req.body?.id;
+    const device = typeof id === 'string' ? store.getDevices().find(item => deviceKey(item) === id) : undefined;
+    if (!device) throw new ApiError('Geraet ist nicht ausgewaehlt.', 400);
+    store.setDevice(device);
+    res.json({ ok: true });
   });
 
   app.post('/api/device', async (req, res) => {
@@ -104,7 +134,7 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
       throw new ApiError('Ungueltige Geraeteauswahl. Bitte Geraeteliste neu laden.', 400);
     }
     if (collector.running) throw new ApiError('Messabfrage laeuft. Bitte kurz warten.', 409);
-    store.setDevice(devices[index]);
+    store.setDevices([devices[index]]);
     await collector.restart();
     if (collector.error) throw new ApiError(`Geraet ausgewaehlt, aber erste Messung fehlgeschlagen: ${collector.error}`, 502);
     res.json({ ok: true });

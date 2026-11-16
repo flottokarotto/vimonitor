@@ -4,7 +4,7 @@ const formatNumber = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, 
 const formatAxis = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, signDisplay: 'negative' });
 const formatTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 const formatDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false, comparison: new Set(), comparisonInitialized: false };
+const state = { hours: 24, status: null, request: 0, charts: {}, discovered: false, refreshing: false, comparison: new Set(), comparisonInitialized: new Set() };
 const lineColors = ['#e6744a', '#279c9d', '#7961b5', '#b08624', '#3277bd', '#c64e83', '#628c3c', '#64748b'];
 const weekDays = [['mon', 'Montag'], ['tue', 'Dienstag'], ['wed', 'Mittwoch'], ['thu', 'Donnerstag'], ['fri', 'Freitag'], ['sat', 'Samstag'], ['sun', 'Sonntag']];
 
@@ -95,15 +95,27 @@ async function loadInsights() {
   }
 }
 
+const seriesKey = (device, sensor) => JSON.stringify([device, sensor]);
+function comparisonSensors(status) {
+  return status.devices.flatMap(device => device.sensors.map(sensor => ({
+    ...sensor, device: device.id, key: seriesKey(device.id, sensor.sensor),
+    display: status.devices.length > 1 ? `${device.name} · ${sensor.label}` : sensor.label,
+  })));
+}
+
 function updateComparisonSensors(sensors) {
-  const available = new Set(sensors.map(sensor => sensor.sensor));
+  const devices = new Set(state.status.devices.map(device => device.id));
+  state.comparisonInitialized = new Set([...state.comparisonInitialized].filter(id => devices.has(id)));
+  const available = new Set(sensors.map(sensor => sensor.key));
   state.comparison = new Set([...state.comparison].filter(sensor => available.has(sensor)));
-  if (!state.comparisonInitialized && sensors.length) {
+  for (const device of state.status.devices) {
+    const deviceSensors = sensors.filter(sensor => sensor.device === device.id);
+    if (!deviceSensors.length || state.comparisonInitialized.has(device.id)) continue;
     for (const kind of ['flow', 'water']) {
-      const sensor = sensors.find(item => item.kind === kind);
-      if (sensor) state.comparison.add(sensor.sensor);
+      const sensor = deviceSensors.find(item => item.kind === kind);
+      if (sensor) state.comparison.add(sensor.key);
     }
-    state.comparisonInitialized = true;
+    state.comparisonInitialized.add(device.id);
   }
   const picker = $('compare-sensors');
   picker.replaceChildren();
@@ -113,15 +125,15 @@ function updateComparisonSensors(sensors) {
     label.title = sensor.sensor;
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.value = sensor.sensor;
-    input.checked = state.comparison.has(sensor.sensor);
+    input.value = sensor.key;
+    input.checked = state.comparison.has(sensor.key);
     input.addEventListener('change', () => {
-      if (input.checked) state.comparison.add(sensor.sensor);
-      else state.comparison.delete(sensor.sensor);
+      if (input.checked) state.comparison.add(sensor.key);
+      else state.comparison.delete(sensor.key);
       void loadHistories();
     });
     const text = document.createElement('span');
-    text.textContent = sensor.label;
+    text.textContent = sensor.display;
     label.append(input, text);
     picker.append(label);
   }
@@ -201,6 +213,9 @@ function renderStatus(status) {
   $('load-devices').hidden = status.demo || !status.connected;
   $('redirect-uri').textContent = `http://localhost:${location.port}/auth/callback`;
   $('device-name').textContent = status.device?.name ?? 'Viessmann · ViCare API';
+  $('active-device-label').hidden = status.devices.length < 2;
+  $('active-device').replaceChildren(...status.devices.map(device => new Option(device.name, device.id)));
+  $('active-device').value = status.activeDevice ?? '';
   $('poll-label').textContent = `Alle ${Math.round(status.pollSeconds / 60)} Minuten`;
   const latest = Math.max(0, ...status.sensors.map(sensor => sensor.timestamp));
   const stale = latest && Date.now() - latest > status.pollSeconds * 2500;
@@ -214,7 +229,7 @@ function renderStatus(status) {
   $('updated').textContent = latest ? `Letzte Messung: ${formatDate.format(latest)}` : 'Noch keine Messung';
   showError(status.error ?? '');
   for (const kind of ['flow', 'water']) updateSensor(kind, status.sensors);
-  updateComparisonSensors(status.sensors);
+  updateComparisonSensors(comparisonSensors(status));
   if (!status.demo && (!status.connected || !status.device)) setupVisible(true);
 }
 
@@ -284,21 +299,22 @@ function updateChart(chart) {
 
 function renderComparison(histories) {
   const chart = state.charts.compare;
-  const selected = state.status.sensors.filter(sensor => state.comparison.has(sensor.sensor));
+  const sensors = comparisonSensors(state.status);
+  const selected = sensors.filter(sensor => state.comparison.has(sensor.key));
   chart.data.datasets = selected.map(sensor => {
-    const index = state.status.sensors.indexOf(sensor);
+    const index = sensors.indexOf(sensor);
     return {
-      label: sensor.label, data: historyData(histories.get(sensor.sensor) ?? []),
+      label: sensor.display, data: historyData(histories.get(sensor.key) ?? []),
       borderColor: lineColors[index % lineColors.length],
       borderDash: index >= lineColors.length ? (index >= lineColors.length * 2 ? [2, 3] : [7, 4]) : [],
       fill: false, tension: 0.22, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false,
     };
   });
   updateChart(chart);
-  const empty = selected.filter(sensor => !histories.get(sensor.sensor)?.length);
+  const empty = selected.filter(sensor => !histories.get(sensor.key)?.length);
   $('compare-empty').hidden = selected.length > 0 && empty.length !== selected.length;
   $('compare-empty').textContent = selected.length ? 'Für diesen Zeitraum liegen keine Messwerte vor.' : 'Bitte mindestens eine Temperatur auswählen.';
-  $('compare-summary').textContent = `${selected.length} von ${state.status.sensors.length} Temperaturen ausgewählt${empty.length ? ` · Keine Messwerte: ${empty.map(sensor => sensor.label).join(', ')}` : ''}`;
+  $('compare-summary').textContent = `${selected.length} von ${sensors.length} Temperaturen ausgewählt${empty.length ? ` · Keine Messwerte: ${empty.map(sensor => sensor.display).join(', ')}` : ''}`;
 }
 
 function renderHistory(kind, points) {
@@ -315,15 +331,19 @@ function renderHistory(kind, points) {
 async function loadHistories() {
   const version = ++state.request;
   try {
-    const sensors = new Set([...state.comparison, ...['flow', 'water'].map(kind => $(`${kind}-sensor`).value)]);
-    sensors.delete('');
-    const results = await Promise.all([...sensors].map(async sensor => {
-      const data = await api(`/api/history?hours=${state.hours}&sensor=${encodeURIComponent(sensor)}`);
-      return [sensor, data.points];
+    const sensors = new Set(state.comparison);
+    for (const kind of ['flow', 'water']) {
+      const sensor = $(`${kind}-sensor`).value;
+      if (sensor && state.status.activeDevice) sensors.add(seriesKey(state.status.activeDevice, sensor));
+    }
+    const results = await Promise.all([...sensors].map(async key => {
+      const [device, sensor] = JSON.parse(key);
+      const data = await api(`/api/history?hours=${state.hours}&sensor=${encodeURIComponent(sensor)}&device=${encodeURIComponent(device)}`);
+      return [key, data.points];
     }));
     if (version !== state.request) return;
     const histories = new Map(results);
-    for (const kind of ['flow', 'water']) renderHistory(kind, histories.get($(`${kind}-sensor`).value) ?? []);
+    for (const kind of ['flow', 'water']) renderHistory(kind, histories.get(seriesKey(state.status.activeDevice, $(`${kind}-sensor`).value)) ?? []);
     renderComparison(histories);
   } catch (error) {
     if (version === state.request) {
@@ -339,10 +359,21 @@ async function loadDevices() {
   $('setup-message').textContent = 'Verfügbare Geräte werden bei Viessmann abgefragt …';
   try {
     const result = await api('/api/devices');
-    const select = $('device-select');
-    select.replaceChildren(...result.devices.map(device => new Option(`${device.name} · Gerät ${device.deviceId} · Auswahl ${device.index + 1}`, String(device.index))));
+    const options = $('device-options');
+    options.replaceChildren(...result.devices.map(device => {
+      const label = document.createElement('label');
+      label.className = 'device-choice';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = String(device.index);
+      input.checked = device.selected;
+      const text = document.createElement('span');
+      text.textContent = `${device.name} · Gerät ${device.deviceId}`;
+      label.append(input, text);
+      return label;
+    }));
     $('device-form').hidden = result.devices.length === 0;
-    $('setup-message').textContent = result.devices.length ? 'Bitte das gewünschte Heizgerät auswählen.' : 'Keine Geräte gefunden. ViCare-Konto, Gateway und API-Freigabe prüfen.';
+    $('setup-message').textContent = result.devices.length ? 'Bitte mindestens ein Heizgerät auswählen.' : 'Keine Geräte gefunden. ViCare-Konto, Gateway und API-Freigabe prüfen.';
     state.discovered = true;
   } catch (error) {
     $('setup-message').textContent = error.message;
@@ -356,6 +387,7 @@ async function refresh() {
   if (state.refreshing) return;
   state.refreshing = true;
   $('refresh').disabled = true;
+  $('active-device').disabled = true;
   try {
     const status = await api('/api/status');
     renderStatus(status);
@@ -371,6 +403,7 @@ async function refresh() {
   } finally {
     state.refreshing = false;
     $('refresh').disabled = false;
+    $('active-device').disabled = false;
   }
 }
 
@@ -380,6 +413,15 @@ async function initialize() {
   $('demo-setup').addEventListener('click', () => { setupVisible(true); $('setup').scrollIntoView({ block: 'center' }); });
   $('refresh').addEventListener('click', refresh);
   $('load-devices').addEventListener('click', loadDevices);
+  $('active-device').addEventListener('change', async event => {
+    try {
+      await api('/api/active-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: event.target.value }) });
+      await refresh();
+    } catch (error) {
+      showError(error.message);
+      event.target.value = state.status.activeDevice;
+    }
+  });
   for (const button of document.querySelectorAll('[data-hours]')) {
     button.addEventListener('click', () => {
       state.hours = Number(button.dataset.hours);
@@ -404,11 +446,11 @@ async function initialize() {
     const button = $('device-form').querySelector('button');
     button.disabled = true;
     try {
-      await api('/api/device', {
+      await api('/api/devices', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index: Number($('device-select').value) }),
+        body: JSON.stringify({ indexes: [...$('device-options').querySelectorAll('input:checked')].map(input => Number(input.value)) }),
       });
-      $('setup-message').textContent = 'Gerät ausgewählt. Die automatische Erfassung ist aktiv.';
+      $('setup-message').textContent = 'Auswahl gespeichert. Die automatische Erfassung ist aktiv.';
       setupVisible(false);
       await refresh();
     } catch (error) {
