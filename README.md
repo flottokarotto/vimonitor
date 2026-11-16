@@ -110,6 +110,10 @@ simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
   ausgewaehlten Heizungen gemeinsam darstellen. Bei einer Abfragebegrenzung
   wird die Erfassung pausiert und der Fehler angezeigt; bei sonstigen
   Geraetefehlern werden die uebrigen Heizungen weiter abgefragt.
+- Haben Heizgeraete denselben Namen, ergaenzt die Anzeige eine kurze, aus der
+  Geraeteidentitaet abgeleitete Kennung. Sie unterscheidet die Geraete in
+  Auswahl, Vergleich und Fehlermeldungen, ohne die volle Gateway-Seriennummer
+  anzuzeigen. Bei nur einem gleichnamigen Geraet entfaellt die Kennung.
 - **Anzeige aktualisieren** liest nur die lokale Datenbank und verbraucht kein
   zusaetzliches Viessmann-Messkontingent.
 - Beide Diagramme bieten eine Sensorwahl. Falls kein passender Vorlauf- oder

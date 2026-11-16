@@ -7,7 +7,7 @@ import type { Store } from './store.ts';
 import type { Collector } from './collector.ts';
 import { ApiError, type Viessmann } from './viessmann.ts';
 import type { Device } from './model.ts';
-import { deviceKey } from './model.ts';
+import { deviceKey, deviceLabels } from './model.ts';
 import { buildInsights } from './insights.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -39,14 +39,16 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
 
   app.get('/api/status', (_req, res) => {
     const device = store.getDevice();
+    const selected = store.getDevices();
+    const labels = deviceLabels(selected);
     res.json({
       demo: config.demo, connected: config.demo || api.connected(),
-      device: device ? { name: device.name } : null,
+      device: device ? { name: labels.get(deviceKey(device)) ?? device.name } : null,
       sensors: device ? store.sensors(device) : [],
       error: collector.error, nextPollAt: collector.nextPollAt,
       pollSeconds: config.pollSeconds, collecting: collector.running,
-      devices: store.getDevices().map(item => ({
-        id: deviceKey(item), name: item.name, sensors: store.sensors(item),
+      devices: selected.map(item => ({
+        id: deviceKey(item), name: labels.get(deviceKey(item)) ?? item.name, sensors: store.sensors(item),
       })),
       activeDevice: device ? deviceKey(device) : null,
     });
@@ -103,7 +105,8 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
     if (config.demo) throw new ApiError('Geraeteauswahl ist im Demo-Modus deaktiviert.', 400);
     devices = await api.devices();
     const selected = new Set(store.getDevices().map(deviceKey));
-    res.json({ devices: devices.map((device, index) => ({ index, name: device.name, deviceId: device.deviceId, selected: selected.has(deviceKey(device)) })) });
+    const labels = deviceLabels(devices);
+    res.json({ devices: devices.map((device, index) => ({ index, name: labels.get(deviceKey(device)) ?? device.name, deviceId: device.deviceId, selected: selected.has(deviceKey(device)) })) });
   });
 
   app.post('/api/devices', async (req, res) => {

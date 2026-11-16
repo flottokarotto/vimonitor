@@ -1,5 +1,5 @@
 import type { Config } from './config.ts';
-import { parseTemperatures } from './model.ts';
+import { deviceKey, deviceLabels, parseTemperatures } from './model.ts';
 import type { Store } from './store.ts';
 import { ApiError, type Viessmann } from './viessmann.ts';
 import { DAYS, localParts, parseSchedules } from './schedules.ts';
@@ -39,8 +39,10 @@ export class Collector {
       } else {
         const failures: string[] = [];
         let retrySeconds = 0;
+        const selected = this.store.getDevices();
+        const labels = deviceLabels(selected);
         if (this.api.connected()) {
-          for (const device of this.store.getDevices()) {
+          for (const device of selected) {
             try {
               const features = await this.api.features(device);
               const temperatures = parseTemperatures(features);
@@ -59,7 +61,7 @@ export class Collector {
               this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
-              failures.push(`${device.name}: ${message}`);
+              failures.push(`${labels.get(deviceKey(device)) ?? device.name}: ${message}`);
               if (error instanceof ApiError && (error.status === 429 || error.status === 401)) {
                 retrySeconds = error.retrySeconds;
                 break;

@@ -1,8 +1,33 @@
+import { createHash } from 'node:crypto';
+
 export interface Device {
   installationId: string;
   gatewaySerial: string;
   deviceId: string;
   name: string;
+}
+
+export function deviceLabels(devices: Device[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const device of devices) counts.set(device.name, (counts.get(device.name) ?? 0) + 1);
+  const used = new Set(devices.map(device => device.name));
+  const labels = new Map<string, string>();
+  const sorted = [...devices].sort((a, b) => deviceKey(a).localeCompare(deviceKey(b), 'en'));
+  for (const device of sorted) {
+    const key = deviceKey(device);
+    if (counts.get(device.name) === 1) {
+      labels.set(key, device.name);
+      continue;
+    }
+    const fingerprint = createHash('sha256').update(key).digest('hex').slice(0, 8);
+    const base = `${device.name} · Kennung ${fingerprint}`;
+    let label = base;
+    let suffix = 2;
+    while (used.has(label)) label = `${base}-${suffix++}`;
+    used.add(label);
+    labels.set(key, label);
+  }
+  return labels;
 }
 
 export interface Temperature {

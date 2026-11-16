@@ -145,8 +145,8 @@ test('multiple heaters collect independently and expose device-specific history'
     const url = String(input);
     calls.push(url);
     if (url.includes('/installations?')) return Response.json({ data: [
-      { id: 1, description: 'Haus A', gateways: [{ serial: '1234' }] },
-      { id: 2, description: 'Haus B', gateways: [{ serial: '5678' }] },
+      { id: 1, description: 'Haus', gateways: [{ serial: 'A1234' }] },
+      { id: 2, description: 'Haus', gateways: [{ serial: 'B1234' }] },
     ] });
     if (url.endsWith('/devices')) return Response.json({ data: [{ id: '0', modelId: 'Vitodens' }] });
     if (url.endsWith('/features')) {
@@ -166,12 +166,17 @@ test('multiple heaters collect independently and expose device-specific history'
   const post = (path: string, value: unknown) => fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(value) });
   const discovered = await (await fetch(`${base}/api/devices`)).json();
   assert.equal(discovered.devices.length, 2);
+  assert.notEqual(discovered.devices[0].name, discovered.devices[1].name);
+  assert.match(discovered.devices[0].name, /Kennung [0-9a-f]{8}$/);
+  assert.match(discovered.devices[1].name, /Kennung [0-9a-f]{8}$/);
   assert.equal((await post('/api/devices', { indexes: [] })).status, 400);
   assert.equal((await post('/api/devices', { indexes: [0, 0] })).status, 400);
   assert.equal((await post('/api/devices', { indexes: [0, 2] })).status, 400);
   assert.equal((await post('/api/devices', { indexes: [0, 1] })).status, 200);
   const status = await (await fetch(`${base}/api/status`)).json();
   assert.equal(status.devices.length, 2);
+  assert.deepEqual(status.devices.map((item: { name: string }) => item.name), discovered.devices.map((item: { name: string }) => item.name));
+  assert.equal(status.device.name, status.devices[0].name);
   assert.deepEqual(status.devices.map((item: { sensors: { value: number }[] }) => item.sensors[0]?.value), [38, 51]);
   assert.equal(status.sensors[0].value, 38);
   const sensor = encodeURIComponent('heating.primaryCircuit.sensors.temperature.supply:value');
@@ -188,7 +193,8 @@ test('multiple heaters collect independently and expose device-specific history'
   failure = 'server';
   const before = calls.length;
   await collector.restart();
-  assert.match(collector.error ?? '', /Haus A.*HTTP 500/);
+  assert.ok(collector.error?.includes(status.devices[0].name));
+  assert.match(collector.error ?? '', /HTTP 500/);
   assert.equal(calls.slice(before).filter(url => url.endsWith('/features')).length, 2);
   assert.equal((await (await fetch(`${base}/api/status`)).json()).devices[1].sensors[0].value, 51);
   failure = 'limit';

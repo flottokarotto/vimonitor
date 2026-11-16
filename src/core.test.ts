@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from './config.ts';
-import { parseTemperatures, temperatureLabel } from './model.ts';
+import { deviceKey, deviceLabels, parseTemperatures, temperatureLabel } from './model.ts';
 import { Store } from './store.ts';
 import { ApiError, Viessmann } from './viessmann.ts';
 import { Collector } from './collector.ts';
@@ -29,6 +29,25 @@ test('configuration rejects invalid values instead of switching modes silently',
   assert.throws(() => loadConfig({ POLL_INTERVAL_SECONDS: '10' }));
   assert.throws(() => loadConfig({ PORT: '' }));
   assert.throws(() => loadConfig({ VIESSMANN_REDIRECT_URI: 'https://example.com' }));
+});
+
+test('duplicate device names receive unique deterministic labels without exposing identifiers', () => {
+  const first = { installationId: 'private-one', gatewaySerial: 'serial-1234', deviceId: '0', name: 'Vitodens · Haus' };
+  const second = { ...first, deviceId: '1' };
+  const different = { ...first, installationId: 'private-two', gatewaySerial: 'other-1234' };
+  const original = [first, second, different];
+  const labels = deviceLabels(original);
+  assert.equal(new Set(labels.values()).size, 3);
+  for (const item of original) {
+    const name = labels.get(deviceKey(item));
+    assert.match(name ?? '', /^Vitodens · Haus · Kennung [a-f0-9]{8}$/);
+    assert.ok(!name?.includes('private-') && !name?.includes('serial-'));
+    assert.equal(deviceLabels([...original].reverse()).get(deviceKey(item)), name);
+  }
+  assert.equal(deviceLabels([first]).get(deviceKey(first)), first.name);
+  const conflict = { ...first, installationId: 'third', name: labels.get(deviceKey(first)) ?? '' };
+  const withConflict = deviceLabels([...original, conflict]);
+  assert.equal(new Set(withConflict.values()).size, 4);
 });
 
 test('sensor parsing distinguishes supply, water, other and disabled sensors', () => {
