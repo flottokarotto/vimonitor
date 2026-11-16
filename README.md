@@ -5,7 +5,7 @@ Warmwasser und weitere verfuegbare Celsius-Sensoren**, dauerhaft in SQLite
 gespeichert. Deutsches Dashboard mit Sensorwahl, 24-Stunden-, 7-Tage- und
 30-Tage-Ansicht.
 
-**Version 1.0.1** · [Release und Quellcode herunterladen](https://github.com/flottokarotto/vimonitor/releases/tag/v1.0.1)
+**Version 1.1.0** · [Release und Quellcode herunterladen](https://github.com/flottokarotto/vimonitor/releases/tag/v1.1.0)
 
 > Die App startet standardmaessig im deutlich gekennzeichneten **Demo-Modus**.
 > Echte Messwerte gibt es erst nach Einrichtung eines eigenen Viessmann-API-Clients.
