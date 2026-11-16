@@ -146,6 +146,9 @@ export function createApp(config: Config, store: Store, api: Viessmann, collecto
   app.get('/vendor/chart.js', (_req, res) => {
     res.sendFile(join(root, 'node_modules', 'chart.js', 'dist', 'chart.umd.js'));
   });
+  app.get('/app.js', (_req, res) => {
+    res.sendFile(join(root, 'dist-public', 'app.js'));
+  });
   app.use(express.static(join(root, 'public'), { etag: false }));
   app.use((_req, res) => { res.status(404).json({ error: 'Nicht gefunden.' }); });
   const handleError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

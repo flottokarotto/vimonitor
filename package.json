@@ -9,19 +9,27 @@
     "node": ">=24.12.0"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch src/server.ts",
+    "dev": "npm run build:ui && node --env-file-if-exists=.env --watch src/server.ts",
+    "dev:ui": "npm run build:ui -- --watch",
     "start": "node --env-file-if-exists=.env dist/server.js",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts"
+    "build": "tsc && npm run build:ui",
+    "build:ui": "esbuild frontend/main.tsx --bundle --platform=browser --format=iife --target=es2022 --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" --outfile=dist-public/app.js",
+    "build:ui-test": "esbuild frontend/ui.test.tsx --bundle --platform=node --packages=external --format=esm --target=node24 --jsx=automatic --outfile=dist-public/ui.test.mjs",
+    "typecheck": "tsc --noEmit && tsc -p frontend/tsconfig.json --noEmit",
+    "test": "npm run build:ui && npm run build:ui-test && node --test src/*.test.ts dist-public/ui.test.mjs"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "esbuild": "^0.25.0",
     "typescript": "^7.0.2"
   }
 }

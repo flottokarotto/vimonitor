@@ -224,6 +224,10 @@ test('demo serves local dashboard assets and rejects live authentication', async
     assert.ok(response.headers.get('content-type')?.includes(contentType));
     await response.arrayBuffer();
   }
+  const html = await (await fetch(`${base}/`)).text();
+  assert.match(html, /id="root"/);
+  assert.match(html, /src="\/app\.js"/);
+  assert.doesNotMatch(html, /src="\/vendor\/chart\.js"/);
   assert.equal((await fetch(`${base}/auth/login`, { redirect: 'manual' })).status, 400);
   assert.equal((await fetch(`${base}/api/devices`)).status, 400);
   assert.equal((await fetch(`${base}/.env`)).status, 404);

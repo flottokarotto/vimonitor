@@ -54,6 +54,12 @@ solange das Terminal offen ist; `Strg+C` beendet sie. Fuer Entwicklung:
 npm run dev
 ```
 
+Das Dashboard verwendet React und wird mit esbuild lokal gebuendelt. `npm run
+dev` erstellt das Frontend beim Start und ueberwacht den Server. Fuer laufende
+Frontend-Aenderungen zusaetzlich in einem zweiten Terminal `npm run dev:ui`
+starten und die Seite nach Aenderungen neu laden. Fuer den normalen Betrieb
+nach einer Quellcode-Aenderung `npm run build` ausfuehren.
+
 Der Server lauscht ausschliesslich auf `127.0.0.1`. Es ist keine Firewallfreigabe
 noetig. Die App ist nicht fuer einen oeffentlichen Webserver, LAN-Zugriff oder
 einen ungeschuetzten Reverse-Proxy ausgelegt.
@@ -296,7 +302,7 @@ echten Viessmann-Zugaenge. GitHub Actions fuehrt sie unter Windows und Linux aus
 | Zeitprogramme und Nacht-Auswertung | [src/schedules.ts](src/schedules.ts), [src/insights.ts](src/insights.ts) |
 | SQLite und Tokenverschluesselung | [src/store.ts](src/store.ts) |
 | Lokale HTTP-Endpunkte | [src/app.ts](src/app.ts) |
-| Dashboard | [public/](public/) |
+| React-Dashboard | [frontend/](frontend/), statische Assets in [public/](public/) |
 
 ## Lizenz
 
