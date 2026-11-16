@@ -106,6 +106,8 @@ export class Store {
   }
   clearDevice() { this.db.prepare("DELETE FROM settings WHERE key IN ('device', 'devices')").run(); }
 
+  hasSecret() { return this.getSetting('tokens') !== undefined; }
+
   saveSecret(value: unknown) {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);

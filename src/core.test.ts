@@ -178,7 +178,7 @@ test('concurrent requests share one token refresh and retain an unrotated refres
     return Response.json({ data: [] });
   };
   const api = new Viessmann(config, store, mock);
-  await Promise.all([api.get('/test'), api.get('/test')]);
+  await Promise.all([api.devices(), api.devices()]);
   assert.equal(refreshed, 1);
   assert.deepEqual(store.loadSecret(), {
     accessToken: 'new-access', refreshToken: 'secret-refresh',
@@ -195,7 +195,7 @@ test('401 refreshes once; revoked refresh tokens disconnect explicitly', async t
     calls++;
     return new Response(null, { status: 401 });
   });
-  await assert.rejects(api.get('/test'), /erneut verbinden/);
+  await assert.rejects(api.devices(), /erneut verbinden/);
   assert.equal(calls, 1);
   assert.equal(api.connected(), false);
 });
@@ -206,7 +206,7 @@ test('429 preserves retry-after without storing fabricated readings', async t =>
   tokens(store);
   const api = new Viessmann(config, store, async () =>
     new Response(null, { status: 429, headers: { 'Retry-After': '7200' } }));
-  await assert.rejects(api.features(device), (error: unknown) =>
+  await assert.rejects(api.read(device), (error: unknown) =>
     error instanceof ApiError && error.retrySeconds === 7200);
   const collector = new Collector(config, store, api, () => 1800000000000);
   t.after(() => collector.stop());

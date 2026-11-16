@@ -60,6 +60,11 @@ Frontend-Aenderungen zusaetzlich in einem zweiten Terminal `npm run dev:ui`
 starten und die Seite nach Aenderungen neu laden. Fuer den normalen Betrieb
 nach einer Quellcode-Aenderung `npm run build` ausfuehren.
 
+Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
+Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden
+typisierte Heizungs-Schnittstellen; der Client benoetigt nur eine Schnittstelle
+fuer die Token-Speicherung. SQLite bleibt die konkrete lokale Speicherung.
+
 Der Server lauscht ausschliesslich auf `127.0.0.1`. Es ist keine Firewallfreigabe
 noetig. Die App ist nicht fuer einen oeffentlichen Webserver, LAN-Zugriff oder
 einen ungeschuetzten Reverse-Proxy ausgelegt.

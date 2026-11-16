@@ -1,9 +1,18 @@
 import type { Config } from './config.ts';
-import { deviceKey, deviceLabels, parseTemperatures } from './model.ts';
+import { deviceKey, deviceLabels } from './model.ts';
 import type { Store } from './store.ts';
-import { ApiError, type Viessmann } from './viessmann.ts';
+import { HeatingError } from './heating.ts';
+import type { HeatingReader } from './heating.ts';
+import { HttpError } from './http-error.ts';
 import { DAYS, localParts, parseSchedules } from './schedules.ts';
-import type { Schedule } from './schedules.ts';
+
+class CollectionError extends Error {
+  retrySeconds: number;
+  constructor(message: string, retrySeconds: number) {
+    super(message);
+    this.retrySeconds = retrySeconds;
+  }
+}
 
 export class Collector {
   error: string | null = null;
@@ -13,13 +22,13 @@ export class Collector {
   private failures = 0;
   private stopped = true;
   private store: Store;
-  private api: Viessmann;
+  private api: HeatingReader;
   private config: Config;
   private now: () => number;
   private finished: Promise<void> = Promise.resolve();
   private resolveFinished: (() => void) | undefined;
 
-  constructor(config: Config, store: Store, api: Viessmann, now = Date.now) {
+  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now) {
     this.config = config;
     this.store = store;
     this.api = api;
@@ -44,32 +53,23 @@ export class Collector {
         if (this.api.connected()) {
           for (const device of selected) {
             try {
-              const features = await this.api.features(device);
-              const temperatures = parseTemperatures(features);
+              const { temperatures, schedules, scheduleError } = await this.api.read(device);
               if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
               const timestamp = this.now();
               this.store.saveReadings(device, timestamp, temperatures);
-              let schedules: Schedule[];
-              let scheduleError: string | null = null;
-              try {
-                schedules = parseSchedules(features);
-              } catch (error) {
-                scheduleError = error instanceof Error ? error.message : 'Zeitprogramme konnten nicht gelesen werden.';
-                console.error(`Zeitprogramme: ${scheduleError}`);
-                schedules = [];
-              }
+              if (scheduleError) console.error(`Zeitprogramme: ${scheduleError}`);
               this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
               failures.push(`${labels.get(deviceKey(device)) ?? device.name}: ${message}`);
-              if (error instanceof ApiError && (error.status === 429 || error.status === 401)) {
+              if (error instanceof HeatingError && (error.status === 429 || error.status === 401)) {
                 retrySeconds = error.retrySeconds;
                 break;
               }
             }
           }
         }
-        if (failures.length) throw new ApiError(failures.join(' | '), 502, retrySeconds);
+        if (failures.length) throw new CollectionError(failures.join(' | '), retrySeconds);
       }
       this.error = null;
       this.failures = 0;
@@ -78,7 +78,7 @@ export class Collector {
       console.error(`Datenerfassung: ${this.error}`);
       this.failures++;
       delay = Math.min(3600, this.config.pollSeconds * 2 ** Math.min(this.failures, 5));
-      if (error instanceof ApiError) delay = Math.max(delay, error.retrySeconds);
+      if (error instanceof CollectionError) delay = Math.max(delay, error.retrySeconds);
     } finally {
       this.running = false;
       this.resolveFinished?.();
@@ -91,7 +91,7 @@ export class Collector {
   }
 
   async restart() {
-    if (this.running) throw new ApiError('Messabfrage laeuft bereits. Bitte kurz warten.', 409);
+    if (this.running) throw new HttpError('Messabfrage laeuft bereits. Bitte kurz warten.', 409);
     if (this.timer) clearTimeout(this.timer);
     this.stopped = false;
     await this.poll();

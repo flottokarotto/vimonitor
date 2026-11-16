@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { dataArray, record } from './model.ts';
+import { dataArray, parseTemperatures, record } from './model.ts';
 import type { Device } from './model.ts';
-import type { Store } from './store.ts';
 import type { Config } from './config.ts';
+import { HeatingError } from './heating.ts';
+import type { HeatingService, HeatingSnapshot } from './heating.ts';
+import { parseSchedules } from './schedules.ts';
 
 const IDP = 'https://iam.viessmann-climatesolutions.com/idp/v3';
 const API = 'https://api.viessmann-climatesolutions.com/iot/v2';
@@ -14,15 +16,7 @@ function retryAfter(response: Response): number {
   return Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
 }
 
-export class ApiError extends Error {
-  status: number;
-  retrySeconds: number;
-  constructor(message: string, status: number, retrySeconds = 0) {
-    super(message);
-    this.status = status;
-    this.retrySeconds = retrySeconds;
-  }
-}
+export class ApiError extends HeatingError {}
 
 interface Tokens {
   accessToken: string;
@@ -30,19 +24,26 @@ interface Tokens {
   expiresAt: number;
 }
 
-export class Viessmann {
-  private config: Config;
-  private store: Store;
+export interface TokenStore {
+  hasSecret(): boolean;
+  loadSecret(): unknown;
+  saveSecret(value: Tokens): void;
+  clearSecret(): void;
+}
+
+export class Viessmann implements HeatingService {
+  private config: Pick<Config, 'clientId' | 'redirectUri'>;
+  private store: TokenStore;
   private request: typeof fetch;
   private refresh: Promise<Tokens> | undefined;
 
-  constructor(config: Config, store: Store, request: typeof fetch = fetch) {
+  constructor(config: Pick<Config, 'clientId' | 'redirectUri'>, store: TokenStore, request: typeof fetch = fetch) {
     this.config = config;
     this.store = store;
     this.request = request;
   }
 
-  connected() { return this.store.getSetting('tokens') !== undefined; }
+  connected() { return this.store.hasSecret(); }
 
   authorization() {
     const verifier = randomBytes(48).toString('base64url');
@@ -100,7 +101,7 @@ export class Viessmann {
     return this.refresh;
   }
 
-  async get(path: string): Promise<unknown[]> {
+  private async get(path: string): Promise<unknown[]> {
     let tokens = await this.accessToken();
     const send = () => this.request(`${API}${path}`, {
       headers: { Authorization: `Bearer ${tokens.accessToken}` }, signal: AbortSignal.timeout(20_000),
@@ -148,7 +149,15 @@ export class Viessmann {
     return result;
   }
 
-  features(device: Device) {
-    return this.get(`/features/installations/${encodeURIComponent(device.installationId)}/gateways/${encodeURIComponent(device.gatewaySerial)}/devices/${encodeURIComponent(device.deviceId)}/features`);
+  async read(device: Device): Promise<HeatingSnapshot> {
+    const features = await this.get(`/features/installations/${encodeURIComponent(device.installationId)}/gateways/${encodeURIComponent(device.gatewaySerial)}/devices/${encodeURIComponent(device.deviceId)}/features`);
+    const temperatures = parseTemperatures(features);
+    if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
+    try {
+      return { temperatures, schedules: parseSchedules(features), scheduleError: null };
+    } catch (error) {
+      const scheduleError = error instanceof Error ? error.message : 'Zeitprogramme konnten nicht gelesen werden.';
+      return { temperatures, schedules: [], scheduleError };
+    }
   }
 }
