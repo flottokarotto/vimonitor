@@ -94,37 +94,43 @@ test('collector depends on the heating reader and respects rate limits across de
   assert.equal(collector.nextPollAt, now + 7200_000);
 });
 
-test('collector retries transient Viessmann device communication errors with bounded backoff', async t => {
+test('collector waits five minutes after the first communication failure without immediate retries', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-communication-retry-'));
   const store = new Store(directory);
   const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
   store.setDevices([first]);
   let attempts = 0;
-  const delays: number[] = [];
   const reader: HeatingReader = {
     connected: () => true,
     read: async () => {
       attempts++;
-      if (attempts < 6) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+      if (attempts < 2) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
       return { temperatures: [temperature], schedules: [], scheduleError: null };
     },
   };
-  const collector = new Collector(config, store, reader, () => 1800000000000, async delay => { delays.push(delay); });
+  const collector = new Collector(config, store, reader, () => 1800000000000);
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.equal(attempts, 6);
-  assert.deepEqual(delays, [2000, 5000, 10_000, 20_000, 30_000]);
+  assert.equal(attempts, 1);
+  assert.match(collector.error ?? '', /DEVICE_COMMUNICATION_ERROR/);
+  assert.equal(collector.nextPollAt, 1800000300000);
+  assert.equal(store.sensors(first).length, 0);
+  t.mock.timers.tick(299_999);
+  assert.equal(attempts, 1);
+  t.mock.timers.tick(1);
+  await collector.waitForIdle();
+  assert.equal(attempts, 2);
   assert.equal(collector.error, null);
   assert.equal(store.sensors(first)[0]?.value, 42);
 });
 
-test('collector follows six communication failures with single attempts every five minutes and recovers', async t => {
+test('collector uses single attempts every five minutes including after recovery', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-communication-failure-'));
   const store = new Store(directory);
   const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
   store.setDevices([first]);
   let attempts = 0;
-  const delays: number[] = [];
   let failing = true;
   const reader: HeatingReader = {
     connected: () => true,
@@ -135,17 +141,15 @@ test('collector follows six communication failures with single attempts every fi
     },
   };
   const now = 1800000000000;
-  const collector = new Collector(config, store, reader, () => now, async delay => { delays.push(delay); });
+  const collector = new Collector(config, store, reader, () => now);
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.equal(attempts, 6);
-  assert.deepEqual(delays, [2000, 5000, 10_000, 20_000, 30_000]);
+  assert.equal(attempts, 1);
   assert.match(collector.error ?? '', /DEVICE_COMMUNICATION_ERROR/);
   assert.equal(collector.nextPollAt, now + 300_000);
   for (let index = 0; index < 3; index++) {
     await collector.restart();
-    assert.equal(attempts, 7 + index);
-    assert.equal(delays.length, 5);
+    assert.equal(attempts, 2 + index);
     assert.equal(collector.nextPollAt, now + 300_000);
   }
   failing = false;
@@ -155,8 +159,8 @@ test('collector follows six communication failures with single attempts every fi
   assert.equal(store.sensors(first)[0]?.value, 42);
   failing = true;
   await collector.restart();
-  assert.equal(attempts, 16);
-  assert.equal(delays.length, 10);
+  assert.equal(attempts, 6);
+  assert.equal(collector.nextPollAt, now + 300_000);
 });
 
 test('mixed failures keep normal backoff and do not retry authentication or limit errors', async t => {
@@ -167,7 +171,6 @@ test('mixed failures keep normal backoff and do not retry authentication or limi
   const now = 1800000000000;
   const calls: string[] = [];
   let status = 500;
-  const delays: number[] = [];
   const reader: HeatingReader = {
     connected: () => true,
     read: async device => {
@@ -178,22 +181,22 @@ test('mixed failures keep normal backoff and do not retry authentication or limi
       throw new HeatingError('Other failure', status, status === 429 ? 7200 : 0);
     },
   };
-  const collector = new Collector(config, store, reader, () => now, async delay => { delays.push(delay); });
+  const collector = new Collector(config, store, reader, () => now);
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 2);
   assert.equal(collector.nextPollAt, now + 600_000);
   for (const nextStatus of [401, 429]) {
     status = nextStatus;
     calls.length = 0;
     await collector.restart();
-    assert.equal(calls.length, 7);
+    assert.equal(calls.length, 2);
     assert.equal(calls.filter(id => id === second.installationId).length, 1);
     assert.equal(collector.nextPollAt, now + (status === 429 ? 7200_000 : 1200_000));
   }
 });
 
-test('communication retries honor Retry-After and stopping cancels retry waits', { timeout: 3000 }, async t => {
+test('communication failures honor longer Retry-After and stop cancels the scheduled retry', { timeout: 3000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-retry-stop-'));
   const store = new Store(directory);
   const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
@@ -204,26 +207,19 @@ test('communication retries honor Retry-After and stopping cancels retry waits',
     connected: () => true,
     read: async () => { attempts++; throw new HeatingError('DEVICE_COMMUNICATION_ERROR', 400, retryAfter); },
   };
-  const delays: number[] = [];
-  const collector = new Collector(config, store, reader, () => 1800000000000, async delay => { delays.push(delay); });
+  const collector = new Collector(config, store, reader, () => 1800000000000);
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.deepEqual(delays, [120_000, 120_000, 120_000, 120_000, 120_000]);
+  assert.equal(attempts, 1);
   assert.equal(collector.nextPollAt, 1800000300000);
   retryAfter = 600;
   await collector.restart();
-  assert.equal(attempts, 7);
-  assert.equal(delays.length, 5);
+  assert.equal(attempts, 2);
   assert.equal(collector.nextPollAt, 1800000600000);
   collector.stop();
-  const stoppedCollector = new Collector(config, store, reader);
-  t.after(() => stoppedCollector.stop());
-  const pending = stoppedCollector.start();
-  await new Promise(resolve => setImmediate(resolve));
-  stoppedCollector.stop();
-  await pending;
-  await stoppedCollector.waitForIdle();
-  assert.equal(attempts, 8);
-  assert.equal(stoppedCollector.running, false);
-  assert.equal(stoppedCollector.nextPollAt, null);
+  await collector.poll();
+  await collector.waitForIdle();
+  assert.equal(attempts, 2);
+  assert.equal(collector.running, false);
+  assert.equal(collector.nextPollAt, null);
 });

@@ -1,16 +1,12 @@
 import type { Config } from './config.ts';
 import { deviceKey, deviceLabels } from './model.ts';
-import type { Device } from './model.ts';
 import type { Store } from './store.ts';
 import { HeatingError } from './heating.ts';
 import type { HeatingReader } from './heating.ts';
 import { HttpError } from './http-error.ts';
 import { DAYS, localParts, parseSchedules } from './schedules.ts';
 import { logger } from './logger.ts';
-import { setTimeout as sleepTimer } from 'node:timers/promises';
 
-const COMMUNICATION_RETRIES = [2, 5, 10, 20, 30] as const;
-type Sleep = (milliseconds: number, signal: AbortSignal) => Promise<void>;
 const communicationError = (error: unknown): error is HeatingError => error instanceof HeatingError
   && error.status === 400 && error.message.includes('DEVICE_COMMUNICATION_ERROR');
 
@@ -39,20 +35,15 @@ export class Collector {
   private now: () => number;
   private finished: Promise<void> = Promise.resolve();
   private resolveFinished: (() => void) | undefined;
-  private sleep: Sleep;
-  private retryAbort = new AbortController();
-  private communicationRecovery = false;
 
-  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now, sleep: Sleep = (milliseconds, signal) =>
-    sleepTimer(milliseconds, undefined, { signal })) {
+  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now) {
     this.config = config;
     this.store = store;
     this.api = api;
     this.now = now;
-    this.sleep = sleep;
   }
 
-  async start() { this.retryAbort = new AbortController(); this.stopped = false; await this.poll(); }
+  async start() { this.stopped = false; await this.poll(); }
 
   async poll() {
     if (this.running || this.stopped) return;
@@ -75,7 +66,7 @@ export class Collector {
           for (const device of selected) {
             if (this.stopped) break;
             try {
-              const { temperatures, schedules, scheduleError } = await this.readDevice(device, labels.get(deviceKey(device)) ?? device.name);
+              const { temperatures, schedules, scheduleError } = await this.api.read(device);
               if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
               const timestamp = this.now();
               this.store.saveSnapshot(device, temperatures, {
@@ -104,7 +95,6 @@ export class Collector {
       }
       this.error = null;
       this.failures = 0;
-      this.communicationRecovery = false;
       if (this.config.demo) logger.info('Demo-Daten aktualisiert.');
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
@@ -115,8 +105,7 @@ export class Collector {
       }
       this.failures++;
       delay = Math.min(3600, this.config.pollSeconds * 2 ** Math.min(this.failures, 5));
-      this.communicationRecovery = error instanceof CollectionError && error.communicationOnly;
-      if (this.communicationRecovery) delay = 300;
+      if (error instanceof CollectionError && error.communicationOnly) delay = 300;
       if (error instanceof CollectionError) delay = Math.max(delay, error.retrySeconds);
     } finally {
       this.running = false;
@@ -133,35 +122,17 @@ export class Collector {
   async restart() {
     if (this.running) throw new HttpError('Messabfrage laeuft bereits. Bitte kurz warten.', 409);
     if (this.timer) clearTimeout(this.timer);
-    this.retryAbort = new AbortController();
     this.stopped = false;
     await this.poll();
   }
 
   stop() {
     this.stopped = true;
-    this.retryAbort.abort();
     this.nextPollAt = null;
     if (this.timer) clearTimeout(this.timer);
   }
 
   async waitForIdle() { await this.finished; }
-
-  private async readDevice(device: Device, label: string) {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await this.api.read(device);
-      } catch (error) {
-        const retryDelay = this.communicationRecovery ? undefined : COMMUNICATION_RETRIES[attempt];
-        if (!communicationError(error) || retryDelay === undefined || this.stopped) throw error;
-        const delay = Math.max(retryDelay, error.retrySeconds);
-        logger.warn(`${label} · Gerätekommunikation fehlgeschlagen (Versuch ${attempt + 1}/${COMMUNICATION_RETRIES.length + 1}) · erneuter Versuch in ${delay}s.`);
-        try { await this.sleep(delay * 1000, this.retryAbort.signal); }
-        catch (failure) { if (this.stopped) throw error; throw failure; }
-        if (this.stopped) throw error;
-      }
-    }
-  }
 
   private demo() {
     const device = { installationId: 'demo', gatewaySerial: 'demo', deviceId: '0', name: 'Demo-Heizung' };

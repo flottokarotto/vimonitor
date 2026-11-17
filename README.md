@@ -195,14 +195,14 @@ simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
 - Abfragen laufen nicht parallel. Fehler erzeugen keine Ersatzmesswerte.
   Wiederholungsversuche erfolgen mit wachsender Pause bis zu einer Stunde;
   ein laengeres `Retry-After` der API wird ebenfalls beachtet.
-- Bei `DEVICE_COMMUNICATION_ERROR` wird dasselbe Geraet bis zu fuenfmal mit
-  Pausen von 2, 5, 10, 20 und 30 Sekunden erneut abgefragt (sechs Versuche insgesamt).
-  Scheitert die Erfassung ausschliesslich an diesem Fehler, folgen alle fuenf Minuten
+- Bei `DEVICE_COMMUNICATION_ERROR` gibt es keine schnellen Wiederholungen:
+  Bereits nach dem ersten Fehler wartet die App fuenf Minuten. Scheitert die
+  Erfassung ausschliesslich an diesem Fehler, folgen weiter alle fuenf Minuten
   einzelne Versuche, bis die Kommunikation wieder funktioniert. Andere Fehler
   verwenden weiterhin den wachsenden Abfrageabstand; `Retry-After` hat Vorrang.
   Nach erfolgreicher Erfassung gilt wieder das normale Abfrageintervall.
   Achtung: Dauerhafte Kommunikationsfehler koennen das API-Tageskontingent
-  schneller aufbrauchen. Beim Beenden werden wartende Retries abgebrochen.
+  schneller aufbrauchen. Beim Beenden werden geplante Wiederholungen abgebrochen.
 - Die Konsolenausgabe enthaelt lokale Zeitstempel, Schweregrade und farbige
   Meldungen in Terminals, die ANSI-Farben unterstuetzen. `NO_COLOR` deaktiviert
   die Farben; `FORCE_COLOR=1` erzwingt sie.
