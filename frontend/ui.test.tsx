@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { chartPoints } from './chart';
+import { MetricCard } from './metric-card';
 import { InsightCards } from './insights';
-import type { Insights } from './types';
+import type { Insights, Status } from './types';
 
 const insight: Insights = {
   timeZone: 'Europe/Berlin', observedAt: 1800000000000, stale: false,
@@ -45,4 +46,19 @@ test('chart data marks missing polling intervals while preserving measurement ex
     { x: 300_000, y: null },
     { x: 1_200_000, y: 40, min: 40, max: 40, count: 1 },
   ]);
+});
+
+test('temperature card renders its selected sensor value and history summary', () => {
+  const status: Status = {
+    demo: true, connected: true, device: { name: 'Demo' }, activeDevice: 'demo',
+    devices: [], pollSeconds: 300, error: null,
+    sensors: [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42, timestamp: 1800000000000 }],
+  };
+  const html = renderToStaticMarkup(<MetricCard kind="flow" status={status} selected="flow" onSelect={() => {}}
+    points={[{ timestamp: 1800000000000, value: 42, min: 41, max: 43, count: 2 }]} hours={24}/>);
+  assert.match(html, /Vorlauftemperatur/);
+  assert.match(html, /42,0/);
+  assert.match(html, /41,0 °C/);
+  assert.match(html, /43,0 °C/);
+  assert.match(html, /2<\/strong>/);
 });

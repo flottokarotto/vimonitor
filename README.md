@@ -60,6 +60,11 @@ Frontend-Aenderungen zusaetzlich in einem zweiten Terminal `npm run dev:ui`
 starten und die Seite nach Aenderungen neu laden. Fuer den normalen Betrieb
 nach einer Quellcode-Aenderung `npm run build` ausfuehren.
 
+Die React-Oberflaeche ist in `frontend/` organisiert: `main.tsx` setzt die
+Dashboard-Bereiche zusammen, `use-dashboard.ts` verwaltet API-Aufrufe und
+Ansichtsdaten, und einzelne Komponenten kapseln Einrichtung, Messkarten,
+Vergleichsdiagramm und Auswertung.
+
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden
 typisierte Heizungs-Schnittstellen; der Client benoetigt nur eine Schnittstelle
