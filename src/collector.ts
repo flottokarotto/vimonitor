@@ -116,7 +116,7 @@ export class Collector {
       this.failures++;
       delay = Math.min(3600, this.config.pollSeconds * 2 ** Math.min(this.failures, 5));
       this.communicationRecovery = error instanceof CollectionError && error.communicationOnly;
-      if (this.communicationRecovery) delay = 60;
+      if (this.communicationRecovery) delay = 300;
       if (error instanceof CollectionError) delay = Math.max(delay, error.retrySeconds);
     } finally {
       this.running = false;
