@@ -70,8 +70,9 @@ Ansichtsdaten, und einzelne Komponenten kapseln Einrichtung, Messkarten,
 Vergleichsdiagramm und Auswertung.
 
 `npm run tui` startet nach `npm run build` den Webserver und zusaetzlich ein
-interaktives Terminal-Dashboard mit [Blessed](https://piranna.github.io/blessed/)
-und `blessed-contrib`-Liniencharts. Beide Oberflaechen teilen sich denselben
+interaktives Terminal-Dashboard mit [Ink](https://github.com/vadimdemedes/ink)
+und React sowie [asciichart](https://github.com/kroitor/asciichart)-Liniencharts.
+Beide Oberflaechen teilen sich denselben
 Collector, dieselbe SQLite-Datenbank und denselben Port. Die Anmeldung oeffnet
 ViCare im Browser. Tasten: `q` schliesst nur das TUI, `Strg+C` beendet Server
 und TUI, `r` aktualisiert, `1`/`2`/`3` waehlt den Zeitraum, `a` wechselt die
@@ -80,14 +81,19 @@ aktive Heizung, `d` oeffnet die Geraeteauswahl, `c` die Vergleichssensoren,
 Auswahlfenstern navigieren Hoch/Runter und Bild auf/ab durch die Liste;
 Links/Rechts scrollt lange Namen horizontal. `Enter` oder die Leertaste
 schaltet einen Eintrag um, `s` speichert und `Esc` schliesst. Ein Live-Protokoll
-ist direkt im TUI sichtbar.
+ist direkt im TUI sichtbar. Es werden mindestens 60 Spalten und 24 Zeilen
+benoetigt. Die Anzeige aktualisiert sich automatisch alle 30 Sekunden.
 Die Charts nutzen den verfuegbaren Platz direkt unter dem Status; Auswertung
-und Logs bleiben in einem kompakten, per Maus scrollbar bedienbaren unteren Bereich.
+und Logs bleiben in einem kompakten, per Tastatur scrollbar bedienbaren unteren Bereich.
 Beim Aendern der Terminalgroesse werden die Diagramme neu gezeichnet.
+Die Vergleichskurven teilen sich eine Zeit- und Temperaturskala; laengere
+Messluecken werden nicht durch Linien ueberbrueckt.
 Die Vergleichslegende steht rechts neben dem Diagramm mit vollstaendigen,
-umgebrochenen Namen in den jeweiligen Kurvenfarben. Mit dem Mausrad oder
-`g` und anschliessend Hoch/Runter bzw. Bild auf/ab scrollen; `Esc` gibt den
-Tastaturfokus zurueck.
+umgebrochenen Namen in den jeweiligen Kurvenfarben. `g` fokussiert die Legende,
+`p` das Live-Protokoll und `i` die Auswertung. Anschliessend mit Hoch/Runter,
+Bild auf/ab oder Pos1/Ende scrollen; `Esc` gibt den Tastaturfokus zurueck.
+Die Ink-Oberflaeche verwendet keine Maussteuerung. `q` stellt die normale
+Konsole wieder her; der Webserver und die Datenerfassung laufen weiter.
 
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden

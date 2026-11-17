@@ -1,44 +1,134 @@
-export interface TerminalPoint {
-  timestamp: number;
-  value: number;
-}
+import { plot } from 'asciichart';
+import type { Temperature } from './model.ts';
+import type { buildInsights } from './insights.ts';
+import type { LogEntry } from './logger.ts';
 
+export const terminalColors = ['cyan', 'yellow', 'green', 'magenta', 'blueBright', 'red', 'white', 'yellowBright'] as const;
+export const periods = [24, 168, 720] as const;
+export const periodLabels = ['24 Stunden', '7 Tage', '30 Tage'] as const;
+
+export interface TerminalPoint { timestamp: number; value: number }
+export interface TerminalSensor extends Temperature { timestamp: number }
+export interface TerminalDevice { id: string; name: string; sensors: TerminalSensor[] }
 export interface TerminalSeries {
+  key: string;
   title: string;
-  x: string[];
-  y: number[];
+  points: TerminalPoint[];
+}
+export interface TerminalSnapshot {
+  demo: boolean;
+  connected: boolean;
+  devices: TerminalDevice[];
+  activeDevice: string | null;
+  error: string | null;
+  collecting: boolean;
+  nextPollAt: number | null;
+  pollSeconds: number;
+  from: number;
+  to: number;
+  histories: Map<string, TerminalPoint[]>;
+  insights: ReturnType<typeof buildInsights>;
 }
 
-export function chartSeries(title: string, points: TerminalPoint[], maxPoints = 48): TerminalSeries {
-  if (!Number.isInteger(maxPoints) || maxPoints < 2) throw new RangeError('maxPoints muss mindestens 2 sein.');
-  if (points.length <= maxPoints) {
-    return {
-      title,
-      x: points.map(point => new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })),
-      y: points.map(point => point.value),
-    };
+export const seriesKey = (device: string, sensor: string) => JSON.stringify([device, sensor]);
+export const terminalLog = (entry: LogEntry) => `${entry.timestamp} [${entry.level}] ${entry.message}`;
+export const logColor = (level: LogEntry['level']) => level === 'ERROR' ? 'red'
+  : level === 'WARN' ? 'yellow' : level === 'OK' ? 'green' : 'cyan';
+
+export function wrapTerminalText(text: string, width: number): string[] {
+  const columns = Math.max(1, Math.floor(width));
+  return text.split('\n').flatMap(line => {
+    const characters = Array.from(line);
+    if (!characters.length) return [''];
+    const result: string[] = [];
+    for (let index = 0; index < characters.length; index += columns) {
+      result.push(characters.slice(index, index + columns).join(''));
+    }
+    return result;
+  });
+}
+
+export interface ChartRun { text: string; color: string }
+
+export function terminalChart(
+  series: TerminalSeries[], width: number, height: number, from: number, to: number, pollSeconds: number,
+): ChartRun[][] {
+  if (!Number.isInteger(width) || width < 12 || !Number.isInteger(height) || height < 2
+    || !Number.isFinite(from) || !Number.isFinite(to) || to <= from
+    || !Number.isFinite(pollSeconds) || pollSeconds <= 0) {
+    throw new RangeError('Ungueltige Terminal-Chartabmessungen oder Zeitbasis.');
   }
-  const bucketSize = Math.ceil(points.length / maxPoints);
-  const sampled: TerminalPoint[] = [];
-  for (let offset = 0; offset < points.length; offset += bucketSize) {
-    const bucket = points.slice(offset, offset + bucketSize);
-    const last = bucket.at(-1);
-    if (!last) continue;
-    sampled.push({
-      timestamp: last.timestamp,
-      value: bucket.reduce((sum, point) => sum + point.value, 0) / bucket.length,
-    });
-  }
-  return {
-    title,
-    x: sampled.map(point => new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })),
-    y: sampled.map(point => point.value),
+  const columns = width - 8;
+  const values = series.flatMap(item => item.points)
+    .filter(point => point.timestamp >= from && point.timestamp <= to && Number.isFinite(point.value));
+  if (!values.length) return [[{ text: 'Keine Messwerte'.slice(0, width), color: 'gray' }]];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of values) { min = Math.min(min, point.value); max = Math.max(max, point.value); }
+  const padding = Math.max(0.5, (max - min) * 0.1);
+  min = Math.floor(min - padding);
+  max = Math.ceil(max + padding);
+  const config = {
+    min, max, height: Math.max(1, height - 2), offset: 2,
+    format: (value: number) => value.toFixed(1).padStart(7),
   };
-}
-
-export function terminalLog(entry: { timestamp: string; level: string; message: string }): string {
-  const level = entry.level === 'ERROR' ? '{red-fg}'
-    : entry.level === 'WARN' ? '{yellow-fg}'
-      : entry.level === 'OK' ? '{green-fg}' : '{cyan-fg}';
-  return `${entry.timestamp} ${level}[${entry.level}]{/} ${entry.message}`;
+  const axis = plot([min, max], config).split('\n');
+  const grid = axis.map(line => Array.from({ length: width }, (_, index) => ({
+    text: index < 8 ? (line[index] ?? ' ') : ' ', color: 'gray' as string,
+  })));
+  series.forEach((item, seriesIndex) => {
+    const buckets = new Map<number, { sum: number; count: number; first: number; last: number }>();
+    for (const point of item.points) {
+      if (point.timestamp < from || point.timestamp > to || !Number.isFinite(point.value)) continue;
+      const column = Math.min(columns - 1, Math.floor((point.timestamp - from) / (to - from) * columns));
+      const bucket = buckets.get(column);
+      if (bucket) {
+        bucket.sum += point.value; bucket.count++;
+        bucket.first = Math.min(bucket.first, point.timestamp); bucket.last = Math.max(bucket.last, point.timestamp);
+      } else buckets.set(column, { sum: point.value, count: 1, first: point.timestamp, last: point.timestamp });
+    }
+    let segment: number[] = [];
+    let start = 0;
+    let previousColumn = -2;
+    let previousTime = -Infinity;
+    let previousValue = 0;
+    const flush = () => {
+      if (!segment.length) return;
+      const lines = plot(segment, config).split('\n');
+      lines.forEach((line, row) => {
+        for (let index = 0; index < segment.length; index++) {
+          const glyph = line[7 + index];
+          const cell = grid[row]?.[8 + start + index];
+          if (cell && glyph && glyph !== ' ' && glyph !== '┤') {
+            cell.text = glyph;
+            cell.color = terminalColors[seriesIndex % terminalColors.length]!;
+          }
+        }
+      });
+      segment = [];
+    };
+    for (const [column, bucket] of [...buckets].sort(([a], [b]) => a - b)) {
+      const value = bucket.sum / bucket.count;
+      if (bucket.first - previousTime > pollSeconds * 2500) {
+        flush(); start = column;
+      } else {
+        for (let gap = previousColumn + 1; gap < column; gap++) {
+          segment.push(previousValue + (value - previousValue) * (gap - previousColumn) / (column - previousColumn));
+        }
+      }
+      segment.push(value);
+      previousColumn = column; previousTime = bucket.last;
+      previousValue = value;
+    }
+    flush();
+  });
+  return grid.map(row => {
+    const runs: ChartRun[] = [];
+    for (const cell of row) {
+      const last = runs.at(-1);
+      if (last?.color === cell.color) last.text += cell.text;
+      else runs.push({ ...cell });
+    }
+    return runs;
+  });
 }

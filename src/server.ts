@@ -1,7 +1,6 @@
 import { loadConfig } from './config.ts';
 import { logger } from './logger.ts';
 import { createRuntime } from './runtime.ts';
-import { startTerminal } from './tui.ts';
 
 const config = loadConfig();
 const tuiEnabled = process.argv.includes('--tui');
@@ -28,7 +27,10 @@ if (tuiEnabled && (!process.stdin.isTTY || !process.stdout.isTTY)) {
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
   void runtime.listen().then(async () => {
-    if (tuiEnabled) terminal = await startTerminal(runtime, () => { void shutdown(); });
+    if (tuiEnabled && !shuttingDown) {
+      const { startTerminal } = await import('./tui.ts');
+      if (!shuttingDown) terminal = await startTerminal(runtime, () => { void shutdown(); });
+    }
   }).catch(async error => {
     logger.error(`ViMonitor konnte nicht gestartet werden: ${error instanceof Error ? error.message : String(error)}`);
     await shutdown();
