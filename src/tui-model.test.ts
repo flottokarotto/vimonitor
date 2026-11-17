@@ -32,7 +32,7 @@ test('terminal charts fit exact bounds, include negative and constant values and
   assert.match(small.join('\n'), /34\.0/);
 });
 
-test('comparison charts align timestamps on a common axis and leave polling gaps empty', () => {
+test('comparison charts align timestamps without extending lines beyond each series', () => {
   const rows = terminalChart([
     { key: 'flow', title: 'Vorlauf', points: [{ timestamp: 0, value: 30 }, { timestamp: 300_000, value: 32 }] },
     { key: 'water', title: 'Warmwasser', points: [{ timestamp: 3_300_000, value: 50 }, { timestamp: 3_600_000, value: 52 }] },
@@ -45,6 +45,23 @@ test('comparison charts align timestamps on a common axis and leave polling gaps
     { key: 'flow', title: 'Vorlauf', points: [{ timestamp: 0, value: 30 }, { timestamp: 300_000, value: 32 }] },
   ], 80, 10, 0, 300_000, 300));
   assert.ok(continuous.some(line => line.slice(35, 40).trim().length > 0));
+});
+
+test('terminal charts connect every measured point across long gaps without changing source data', () => {
+  for (const values of [[30, 50], [50, 30], [40, 40]]) {
+    const points = [
+      { timestamp: 3_300_000, value: values[1]! },
+      { timestamp: 300_000, value: values[0]! },
+    ];
+    const original = structuredClone(points);
+    const rows = text(terminalChart([{ key: 'flow', title: 'Vorlauf', points }],
+      80, 10, 0, 3_600_000, 300));
+    for (let column = 14; column <= 74; column++) {
+      assert.ok(rows.some(row => row[column]?.trim()), `Missing line at column ${column}`);
+    }
+    assert.ok(rows.every(row => row.slice(8, 14).trim() === '' && row.slice(75).trim() === ''));
+    assert.deepEqual(points, original);
+  }
 });
 
 test('text wrapping preserves the complete name and log formatting has no Blessed markup', () => {

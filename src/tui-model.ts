@@ -77,50 +77,44 @@ export function terminalChart(
     text: index < 8 ? (line[index] ?? ' ') : ' ', color: 'gray' as string,
   })));
   series.forEach((item, seriesIndex) => {
-    const buckets = new Map<number, { sum: number; count: number; first: number; last: number }>();
+    const buckets = new Map<number, { sum: number; count: number }>();
     for (const point of item.points) {
       if (point.timestamp < from || point.timestamp > to || !Number.isFinite(point.value)) continue;
       const column = Math.min(columns - 1, Math.floor((point.timestamp - from) / (to - from) * columns));
       const bucket = buckets.get(column);
       if (bucket) {
         bucket.sum += point.value; bucket.count++;
-        bucket.first = Math.min(bucket.first, point.timestamp); bucket.last = Math.max(bucket.last, point.timestamp);
-      } else buckets.set(column, { sum: point.value, count: 1, first: point.timestamp, last: point.timestamp });
+      } else buckets.set(column, { sum: point.value, count: 1 });
     }
-    let segment: number[] = [];
+    const segment: number[] = [];
     let start = 0;
-    let previousColumn = -2;
-    let previousTime = -Infinity;
+    let previousColumn = -1;
     let previousValue = 0;
-    const flush = () => {
-      if (!segment.length) return;
-      const lines = plot(segment, config).split('\n');
-      lines.forEach((line, row) => {
-        for (let index = 0; index < segment.length; index++) {
-          const glyph = line[7 + index];
-          const cell = grid[row]?.[8 + start + index];
-          if (cell && glyph && glyph !== ' ' && glyph !== '┤') {
-            cell.text = glyph;
-            cell.color = terminalColors[seriesIndex % terminalColors.length]!;
-          }
-        }
-      });
-      segment = [];
-    };
     for (const [column, bucket] of [...buckets].sort(([a], [b]) => a - b)) {
       const value = bucket.sum / bucket.count;
-      if (bucket.first - previousTime > pollSeconds * 2500) {
-        flush(); start = column;
+      if (!segment.length) {
+        start = column;
       } else {
         for (let gap = previousColumn + 1; gap < column; gap++) {
           segment.push(previousValue + (value - previousValue) * (gap - previousColumn) / (column - previousColumn));
         }
       }
       segment.push(value);
-      previousColumn = column; previousTime = bucket.last;
+      previousColumn = column;
       previousValue = value;
     }
-    flush();
+    if (!segment.length) return;
+    const lines = plot(segment, config).split('\n');
+    lines.forEach((line, row) => {
+      for (let index = 0; index < segment.length; index++) {
+        const glyph = line[7 + index];
+        const cell = grid[row]?.[8 + start + index];
+        if (cell && glyph && glyph !== ' ' && glyph !== '┤') {
+          cell.text = glyph;
+          cell.color = terminalColors[seriesIndex % terminalColors.length]!;
+        }
+      }
+    });
   });
   return grid.map(row => {
     const runs: ChartRun[] = [];

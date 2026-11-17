@@ -86,8 +86,9 @@ benoetigt. Die Anzeige aktualisiert sich automatisch alle 30 Sekunden.
 Die Charts nutzen den verfuegbaren Platz direkt unter dem Status; Auswertung
 und Logs bleiben in einem kompakten, per Tastatur scrollbar bedienbaren unteren Bereich.
 Beim Aendern der Terminalgroesse werden die Diagramme neu gezeichnet.
-Die Vergleichskurven teilen sich eine Zeit- und Temperaturskala; laengere
-Messluecken werden nicht durch Linien ueberbrueckt.
+Die Vergleichskurven teilen sich eine Zeit- und Temperaturskala. Terminalcharts
+verbinden Messpunkte auch ueber laengere Messluecken mit geraden Linien.
+Diese Verbindung ist nur eine Darstellung; fehlende Messwerte werden nicht gespeichert.
 Die Vergleichslegende steht rechts neben dem Diagramm mit vollstaendigen,
 umgebrochenen Namen in den jeweiligen Kurvenfarben. `g` fokussiert die Legende,
 `p` das Live-Protokoll und `i` die Auswertung. Anschliessend mit Hoch/Runter,
@@ -178,7 +179,8 @@ simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
 - Zeitstempel sind **Abrufzeitpunkte in UTC**. Die Anzeige verwendet die
   Browser-Zeitzone; sie sind keine vom Sensor bestaetigten Messzeitpunkte.
 - Maximal 601 Zeitbloecke pro Diagramm. Angezeigt werden Mittelwerte, im Tooltip
-  auch Minimum, Maximum und Messanzahl. Messluecken werden nicht interpoliert.
+  auch Minimum, Maximum und Messanzahl. Im Webdiagramm werden Messluecken
+  nicht interpoliert; Terminalcharts verbinden die vorhandenen Punkte.
 - Y-Achsen zeigen gerundete Celsius-Werte mit hoechstens einer Nachkommastelle
   und deutschem Dezimalkomma; die gespeicherten Messwerte bleiben unveraendert.
 - Im dritten Diagramm **Temperaturen vergleichen** lassen sich beliebige
