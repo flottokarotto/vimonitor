@@ -54,6 +54,9 @@ solange das Terminal offen ist; `Strg+C` beendet sie. Fuer Entwicklung:
 npm run dev
 ```
 
+Fuer das Terminal-Dashboard statt des Webservers nach dem Build `npm run tui`
+starten.
+
 Das Dashboard verwendet React und wird mit esbuild lokal gebuendelt. `npm run
 dev` erstellt das Frontend beim Start und ueberwacht den Server. Fuer laufende
 Frontend-Aenderungen zusaetzlich in einem zweiten Terminal `npm run dev:ui`
@@ -64,6 +67,16 @@ Die React-Oberflaeche ist in `frontend/` organisiert: `main.tsx` setzt die
 Dashboard-Bereiche zusammen, `use-dashboard.ts` verwaltet API-Aufrufe und
 Ansichtsdaten, und einzelne Komponenten kapseln Einrichtung, Messkarten,
 Vergleichsdiagramm und Auswertung.
+
+Alternativ startet `npm run tui` nach `npm run build` ein interaktives
+Terminal-Dashboard mit [Blessed](https://piranna.github.io/blessed/) und
+`blessed-contrib`-Liniencharts. Es verwendet dieselbe lokale Datenbank und
+Erfassung wie das Webdashboard; Webserver und TUI deshalb nicht gleichzeitig
+starten. Die Anmeldung oeffnet ViCare im Browser. Tasten: `q` beenden, `r`
+aktualisieren, `1`/`2`/`3` Zeitraum, `a` aktive Heizung wechseln, `d`
+Geraeteauswahl, `c` Vergleichssensoren, `f`/`w` Messsensor wechseln und `l`
+ViCare-Anmeldung oeffnen. In Auswahlfenstern schaltet `Enter` einen Eintrag,
+`s` speichert und `Esc` schliesst. Ein Live-Protokoll ist direkt im TUI sichtbar.
 
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden
