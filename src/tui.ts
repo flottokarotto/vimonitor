@@ -57,6 +57,88 @@ function launchLogin(port: number) {
   browser.unref();
 }
 
+export function createTerminalChooser<T extends { key: string; label: string; selected: boolean }>(
+  screen: blessed.Widgets.Screen,
+  title: string,
+  choices: T[],
+  save: (selected: T[]) => Promise<void>,
+  onClose: () => void,
+) {
+  const selected = new Set(choices.filter(item => item.selected).map(item => item.key));
+  const box = blessed.box({
+    top: 'center', left: 'center', width: '95%', height: '85%',
+    border: { type: 'line' }, label: ` ${title} `,
+    style: { border: { fg: 'cyan' }, bg: 'black' },
+  });
+  const list = blessed.list({
+    top: 0, left: 0, right: 0, bottom: 4,
+    keys: true, mouse: true, tags: false,
+    scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+    style: { selected: { fg: 'black', bg: 'cyan', bold: true } },
+  });
+  const footer = blessed.box({
+    bottom: 0, left: 0, right: 0, height: 4,
+    content: ' Hoch/Runter, Bild auf/ab: Liste\n Links/Rechts: langen Namen lesen\n Enter/Leertaste: umschalten · s: speichern · Esc: schließen',
+  });
+  box.append(list);
+  box.append(footer);
+  screen.append(box);
+  let offset = 0;
+  let selectedIndex = 0;
+  let closed = false;
+  let saving = false;
+  list.on('select item', (_item, index) => { selectedIndex = index; });
+  const renderItems = () => {
+    const index = selectedIndex;
+    const width = Math.max(1, Number(list.width) - 6);
+    const longest = Math.max(0, ...choices.map(item => Array.from(item.label).length));
+    offset = Math.min(offset, Math.max(0, longest - width));
+    list.setItems(choices.map(item =>
+      `${selected.has(item.key) ? '[x]' : '[ ]'} ${offset ? '<' : ' '}${Array.from(item.label).slice(offset).join('')}`));
+    list.select(index);
+    screen.render();
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    screen.off('resize', renderItems);
+    box.destroy();
+    onClose();
+    screen.render();
+  };
+  const toggle = () => {
+    const item = choices[selectedIndex];
+    if (!item || saving) return;
+    if (selected.has(item.key)) selected.delete(item.key);
+    else selected.add(item.key);
+    renderItems();
+  };
+  list.on('select', toggle);
+  list.key('space', toggle);
+  list.key(['left', 'right'], (_ch, key) => {
+    offset = Math.max(0, offset + (key.name === 'left' ? -8 : 8));
+    renderItems();
+  });
+  list.key(['pageup', 'pagedown', 'home', 'end'], (_ch, key) => {
+    const page = Math.max(1, Number(list.height) - 1);
+    list.select(key.name === 'home' ? 0 : key.name === 'end' ? choices.length - 1
+      : selectedIndex + (key.name === 'pageup' ? -page : page));
+    screen.render();
+  });
+  list.key('escape', close);
+  list.key('s', () => {
+    if (saving) return;
+    saving = true;
+    void save(choices.filter(item => selected.has(item.key))).then(close).catch(error => {
+      logger.error(`Auswahl konnte nicht gespeichert werden: ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => { saving = false; });
+  });
+  screen.on('resize', renderItems);
+  renderItems();
+  list.focus();
+  return { box, list, close };
+}
+
 export async function startTerminal(runtime: Runtime, onQuit: () => void): Promise<{ close(): void }> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error('Die Terminaloberfläche benötigt ein interaktives Terminal.');
@@ -77,17 +159,17 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
   const flowChart = grid.set(6, 0, 3, 6, contrib.line, {
     label: ' Vorlauf · f Sensor wechseln ',
     showLegend: false, wholeNumbersOnly: false,
-    style: { line: 'cyan', text: 'white', baseline: 'gray' },
+    style: { line: 'cyan', text: 'white', baseline: 'white' },
   });
   const waterChart = grid.set(6, 6, 3, 6, contrib.line, {
     label: ' Warmwasser · w Sensor wechseln ',
     showLegend: false, wholeNumbersOnly: false,
-    style: { line: 'yellow', text: 'white', baseline: 'gray' },
+    style: { line: 'yellow', text: 'white', baseline: 'white' },
   });
   const comparisonChart = grid.set(9, 0, 4, 12, contrib.line, {
     label: ' Temperaturvergleich · c Auswahl bearbeiten ',
     showLegend: true, wholeNumbersOnly: false,
-    style: { line: 'green', text: 'white', baseline: 'gray' },
+    style: { line: 'green', text: 'white', baseline: 'white' },
   });
   const insightsBox = blessed.box({
     top: '66%', left: 0, width: '50%', height: '33%', tags: true, scrollable: true,
@@ -187,7 +269,7 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
       title,
       x: sampled.x,
       y: sampled.y,
-      style: { line: color, text: color, baseline: 'gray' },
+      style: { line: color, text: color, baseline: 'white' },
     }]);
   }
 
@@ -229,7 +311,7 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
         title: item.display,
         x: sampled.x,
         y: sampled.y,
-        style: { line: colorFor(index), text: colorFor(index), baseline: 'gray' },
+        style: { line: colorFor(index), text: colorFor(index), baseline: 'white' },
       };
     }));
   }
@@ -317,54 +399,7 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
     save: (selected: T[]) => Promise<void>,
   ) {
     if (modal) return;
-    const selected = new Set(choices.filter(item => item.selected).map(item => item.key));
-    const box = blessed.box({
-      top: 'center', left: 'center', width: '75%', height: '75%',
-      border: { type: 'line' }, label: ` ${title} `,
-      style: { border: { fg: 'cyan' }, bg: 'black' },
-    });
-    const list = blessed.list({
-      top: 1, left: 1, right: 1, bottom: 3,
-      items: choices.map(item => `${selected.has(item.key) ? '[x]' : '[ ]'} ${item.label}`),
-      keys: true, vi: true, mouse: true, tags: true, border: { type: 'line' },
-      style: { selected: { fg: 'black', bg: 'cyan', bold: true }, border: { fg: 'gray' } },
-    });
-    const footer = blessed.box({
-      bottom: 0, left: 1, right: 1, height: 2,
-      content: ' Enter: Auswahl umschalten · s: speichern · Esc: schließen',
-      style: { fg: 'white' },
-    });
-    box.append(list);
-    box.append(footer);
-    screen.append(box);
-    const close = () => {
-      screen.unkey('s', onSave);
-      screen.unkey('escape', onClose);
-      box.destroy();
-      modal = undefined;
-      screen.render();
-    };
-    const onClose = () => close();
-    const onSave = () => {
-      const result = choices.filter(item => selected.has(item.key));
-      void save(result).then(close).catch(error => {
-        logger.error(`Auswahl konnte nicht gespeichert werden: ${error instanceof Error ? error.message : String(error)}`);
-      });
-    };
-    list.on('select', (_item, index) => {
-      const item = choices[index];
-      if (!item) return;
-      if (selected.has(item.key)) selected.delete(item.key);
-      else selected.add(item.key);
-      list.setItems(choices.map(choice => `${selected.has(choice.key) ? '[x]' : '[ ]'} ${choice.label}`));
-      list.select(index);
-      screen.render();
-    });
-    screen.key('s', onSave);
-    screen.key('escape', onClose);
-    modal = { box, list, close };
-    list.focus();
-    screen.render();
+    modal = createTerminalChooser(screen, title, choices, save, () => { modal = undefined; });
   }
 
   async function editDevices() {
@@ -453,19 +488,22 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
     removeLogSink();
   }
 
-  screen.key('q', close);
+  const dashboardKey = (key: string, action: () => void) => screen.key(key, () => {
+    if (!modal) action();
+  });
+  dashboardKey('q', close);
   screen.key('C-c', onQuit);
-  screen.key('r', () => { void refresh(); });
-  screen.key('1', () => cyclePeriod(0));
-  screen.key('2', () => cyclePeriod(1));
-  screen.key('3', () => cyclePeriod(2));
-  screen.key('a', () => { void setActiveDevice(1); });
-  screen.key('A', () => { void setActiveDevice(-1); });
-  screen.key('d', () => { void editDevices(); });
-  screen.key('c', editComparison);
-  screen.key('f', () => cycleSensor('flow'));
-  screen.key('w', () => cycleSensor('water'));
-  screen.key('l', () => {
+  dashboardKey('r', () => { void refresh(); });
+  dashboardKey('1', () => cyclePeriod(0));
+  dashboardKey('2', () => cyclePeriod(1));
+  dashboardKey('3', () => cyclePeriod(2));
+  dashboardKey('a', () => { void setActiveDevice(1); });
+  dashboardKey('A', () => { void setActiveDevice(-1); });
+  dashboardKey('d', () => { void editDevices(); });
+  dashboardKey('c', editComparison);
+  dashboardKey('f', () => cycleSensor('flow'));
+  dashboardKey('w', () => cycleSensor('water'));
+  dashboardKey('l', () => {
     if (status?.demo) {
       logger.warn('Die ViCare-Anmeldung steht im Demo-Modus nicht zur Verfügung.');
       return;

@@ -77,8 +77,10 @@ ViCare im Browser. Tasten: `q` schliesst nur das TUI, `Strg+C` beendet Server
 und TUI, `r` aktualisiert, `1`/`2`/`3` waehlt den Zeitraum, `a` wechselt die
 aktive Heizung, `d` oeffnet die Geraeteauswahl, `c` die Vergleichssensoren,
 `f`/`w` wechselt den Messsensor und `l` oeffnet die ViCare-Anmeldung. In
-Auswahlfenstern schaltet `Enter` einen Eintrag um, `s` speichert und `Esc`
-schliesst. Ein Live-Protokoll ist direkt im TUI sichtbar.
+Auswahlfenstern navigieren Hoch/Runter und Bild auf/ab durch die Liste;
+Links/Rechts scrollt lange Namen horizontal. `Enter` oder die Leertaste
+schaltet einen Eintrag um, `s` speichert und `Esc` schliesst. Ein Live-Protokoll
+ist direkt im TUI sichtbar.
 
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden
