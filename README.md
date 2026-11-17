@@ -84,6 +84,10 @@ ist direkt im TUI sichtbar.
 Die Charts nutzen den verfuegbaren Platz direkt unter dem Status; Auswertung
 und Logs bleiben in einem kompakten, per Maus scrollbar bedienbaren unteren Bereich.
 Beim Aendern der Terminalgroesse werden die Diagramme neu gezeichnet.
+Die Vergleichslegende steht rechts neben dem Diagramm mit vollstaendigen,
+umgebrochenen Namen in den jeweiligen Kurvenfarben. Mit dem Mausrad oder
+`g` und anschliessend Hoch/Runter bzw. Bild auf/ab scrollen; `Esc` gibt den
+Tastaturfokus zurueck.
 
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden

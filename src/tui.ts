@@ -47,6 +47,14 @@ function colorFor(index: number): string {
   return ['cyan', 'yellow', 'green', 'magenta', 'blue', 'red', 'white', 'yellow'][index % 8]!;
 }
 
+export function updateTerminalLegend(legend: blessed.Widgets.BoxElement, titles: string[]) {
+  const scroll = legend.getScroll();
+  legend.setContent(titles.length ? titles.map((title, index) =>
+    `{${colorFor(index)}-fg}${index + 1}. ${blessed.escape(title)}{/${colorFor(index)}-fg}`).join('\n\n')
+    : 'Keine Temperaturen ausgewählt.');
+  legend.scrollTo(scroll);
+}
+
 function launchLogin(port: number) {
   const target = `http://localhost:${port}/auth/login`;
   const command = process.platform === 'win32' ? 'rundll32.exe'
@@ -157,14 +165,22 @@ export function createTerminalPanels(screen: blessed.Widgets.Screen) {
     style: { line: 'yellow', text: 'white', baseline: 'white' },
   });
   const comparisonChart = contrib.line({
-    top: '50%', bottom: 0, left: 0, right: 0,
+    top: '50%', bottom: 0, left: 0, width: '65%',
     border: { type: 'line' }, label: ' Temperaturvergleich · c Auswahl bearbeiten ',
-    showLegend: true, wholeNumbersOnly: false,
+    showLegend: false, wholeNumbersOnly: false,
     style: { line: 'green', text: 'white', baseline: 'white' },
   });
   for (const chart of [flowChart, waterChart, comparisonChart]) {
     charts.append(chart);
   }
+  const comparisonLegend = blessed.box({
+    parent: charts, top: '50%', bottom: 0, left: '65%', right: 0,
+    border: { type: 'line' }, label: ' Legende · g Fokus · Esc zurück ',
+    tags: true, scrollable: true, alwaysScroll: true, keys: true, mouse: true,
+    scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+    style: { border: { fg: 'cyan' }, focus: { border: { fg: 'yellow' } } },
+  });
+  comparisonLegend.key('escape', () => { screen.restoreFocus(); screen.render(); });
   const insightsBox = blessed.box({
     parent: footer, top: 0, bottom: 0, left: 0, width: '50%', tags: true, scrollable: true,
     mouse: true, scrollbar: { ch: ' ', style: { bg: 'magenta' } },
@@ -189,7 +205,7 @@ export function createTerminalPanels(screen: blessed.Widgets.Screen) {
   };
   screen.on('resize', resize);
   resize();
-  return { charts, footer, flowChart, waterChart, comparisonChart, insightsBox, logs };
+  return { charts, footer, flowChart, waterChart, comparisonChart, comparisonLegend, insightsBox, logs };
 }
 
 export async function startTerminal(runtime: Runtime, onQuit: () => void): Promise<{ close(): void }> {
@@ -201,14 +217,14 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
   const header = blessed.box({
     top: 0, left: 0, width: '100%', height: 3, tags: true,
     style: { fg: 'white', bg: 'blue' },
-    content: ' ViMonitor | Terminal-Dashboard\n q Terminal schließen  Strg+C alles beenden  r Aktualisieren  1/2/3 Zeitraum  a Heizung  d Geräte  c Vergleich  f/w Sensor  l Login',
+    content: ' ViMonitor | Terminal-Dashboard\n q Terminal schließen  Strg+C alles beenden  r Aktualisieren  1/2/3 Zeitraum  a Heizung  d Geräte  c Vergleich  g Legende  f/w Sensor  l Login',
   });
   const statusBox = blessed.box({
     top: 3, left: 0, width: '100%', height: 4, tags: true,
     border: { type: 'line' }, label: ' Status ',
     style: { border: { fg: 'cyan' } },
   });
-  const { flowChart, waterChart, comparisonChart, insightsBox, logs } = createTerminalPanels(screen);
+  const { flowChart, waterChart, comparisonChart, comparisonLegend, insightsBox, logs } = createTerminalPanels(screen);
   screen.append(header);
   screen.append(statusBox);
   const removeLogSink = logger.subscribe((entry: LogEntry) => {
@@ -344,6 +360,7 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
     comparisonChart.options.data = data.length ? data
       : [{ title: 'Keine Temperaturen ausgewählt', x: [], y: [] }];
     comparisonChart.setData(comparisonChart.options.data);
+    updateTerminalLegend(comparisonLegend, data.map(item => item.title));
   }
 
   async function refresh() {
@@ -531,6 +548,11 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
   dashboardKey('A', () => { void setActiveDevice(-1); });
   dashboardKey('d', () => { void editDevices(); });
   dashboardKey('c', editComparison);
+  dashboardKey('g', () => {
+    if (screen.focused !== comparisonLegend) screen.saveFocus();
+    comparisonLegend.focus();
+    screen.render();
+  });
   dashboardKey('f', () => cycleSensor('flow'));
   dashboardKey('w', () => cycleSensor('water'));
   dashboardKey('l', () => {

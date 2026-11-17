@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
-import { createTerminalChooser, createTerminalPanels } from './tui.ts';
+import { createTerminalChooser, createTerminalPanels, updateTerminalLegend } from './tui.ts';
 import { chartSeries } from './tui-model.ts';
 
 function terminal(columns = 80, rows = 24) {
@@ -40,6 +40,32 @@ test('terminal layout gives charts the available height and redraws after resizi
       assert.ok(chart.getContent().split('\n').length <= Number(chart.height));
     }
   }
+});
+
+test('comparison legend wraps complete names and scrolls to the last sensor', t => {
+  const { screen, close } = terminal(160, 50);
+  t.after(close);
+  const { comparisonLegend, comparisonChart } = createTerminalPanels(screen);
+  const titles = Array.from({ length: 20 }, (_, index) =>
+    `Heizung ${index} · Gateway 1234 · Gewuenschte Warmwassertemperatur Sensor-${index}-Ende`);
+  updateTerminalLegend(comparisonLegend, titles);
+  screen.render();
+  assert.equal(comparisonChart.options.showLegend, false);
+  assert.match(comparisonLegend.getContent(), /Sensor-0-Ende/);
+  assert.match(comparisonLegend.getContent(), /Sensor-19-Ende/);
+  assert.ok(comparisonLegend.getScrollHeight() > Number(comparisonLegend.height));
+  comparisonLegend.focus();
+  screen.program.emit('keypress', undefined, { name: 'down', full: 'down' });
+  assert.ok(comparisonLegend.getScroll() > 0);
+  comparisonLegend.setScrollPerc(100);
+  screen.render();
+  const frame: unknown = screen.screenshot();
+  assert.ok(typeof frame === 'string');
+  assert.match(frame, /Sensor-19-Ende/);
+  updateTerminalLegend(comparisonLegend, titles);
+  assert.ok(comparisonLegend.getScroll() > 0);
+  updateTerminalLegend(comparisonLegend, []);
+  assert.match(comparisonLegend.getContent(), /Keine Temperaturen/);
 });
 
 test('terminal chooser scrolls long labels horizontally and the complete list vertically', async t => {
