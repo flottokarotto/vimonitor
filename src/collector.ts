@@ -7,17 +7,22 @@ import type { HeatingReader } from './heating.ts';
 import { HttpError } from './http-error.ts';
 import { DAYS, localParts, parseSchedules } from './schedules.ts';
 import { logger } from './logger.ts';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 
-const COMMUNICATION_RETRIES = [10, 30] as const;
-type Sleep = (milliseconds: number) => Promise<void>;
+const COMMUNICATION_RETRIES = [2, 5, 10, 20, 30] as const;
+type Sleep = (milliseconds: number, signal: AbortSignal) => Promise<void>;
+const communicationError = (error: unknown): error is HeatingError => error instanceof HeatingError
+  && error.status === 400 && error.message.includes('DEVICE_COMMUNICATION_ERROR');
 
 class CollectionError extends Error {
   retrySeconds: number;
   failedDevices: string[];
-  constructor(message: string, retrySeconds: number, failedDevices: string[]) {
+  communicationOnly: boolean;
+  constructor(message: string, retrySeconds: number, failedDevices: string[], communicationOnly: boolean) {
     super(message);
     this.retrySeconds = retrySeconds;
     this.failedDevices = failedDevices;
+    this.communicationOnly = communicationOnly;
   }
 }
 
@@ -35,9 +40,11 @@ export class Collector {
   private finished: Promise<void> = Promise.resolve();
   private resolveFinished: (() => void) | undefined;
   private sleep: Sleep;
+  private retryAbort = new AbortController();
+  private communicationRecovery = false;
 
-  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now, sleep: Sleep = milliseconds =>
-    new Promise(resolve => setTimeout(resolve, milliseconds))) {
+  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now, sleep: Sleep = (milliseconds, signal) =>
+    sleepTimer(milliseconds, undefined, { signal })) {
     this.config = config;
     this.store = store;
     this.api = api;
@@ -45,7 +52,7 @@ export class Collector {
     this.sleep = sleep;
   }
 
-  async start() { this.stopped = false; await this.poll(); }
+  async start() { this.retryAbort = new AbortController(); this.stopped = false; await this.poll(); }
 
   async poll() {
     if (this.running || this.stopped) return;
@@ -61,10 +68,12 @@ export class Collector {
         const failures: string[] = [];
         const failedDevices: string[] = [];
         let retrySeconds = 0;
+        let communicationOnly = true;
         const selected = this.store.getDevices();
         const labels = deviceLabels(selected);
         if (this.api.connected()) {
           for (const device of selected) {
+            if (this.stopped) break;
             try {
               const { temperatures, schedules, scheduleError } = await this.readDevice(device, labels.get(deviceKey(device)) ?? device.name);
               if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
@@ -80,8 +89,9 @@ export class Collector {
               const label = labels.get(deviceKey(device)) ?? device.name;
               failures.push(`${label}: ${message}`);
               failedDevices.push(label);
+              communicationOnly = communicationOnly && communicationError(error);
+              if (error instanceof HeatingError) retrySeconds = Math.max(retrySeconds, error.retrySeconds);
               if (error instanceof HeatingError && (error.status === 429 || error.status === 401)) {
-                retrySeconds = error.retrySeconds;
                 break;
               }
             }
@@ -90,10 +100,11 @@ export class Collector {
         if (collectedDevices > 0) {
           logger.info(`Messwerte erfasst · ${collectedDevices} Heizgerät(e) · ${collectedSensors} Sensorwerte.`);
         }
-        if (failures.length) throw new CollectionError(failures.join(' | '), retrySeconds, failedDevices);
+        if (failures.length) throw new CollectionError(failures.join(' | '), retrySeconds, failedDevices, communicationOnly);
       }
       this.error = null;
       this.failures = 0;
+      this.communicationRecovery = false;
       if (this.config.demo) logger.info('Demo-Daten aktualisiert.');
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
@@ -104,6 +115,8 @@ export class Collector {
       }
       this.failures++;
       delay = Math.min(3600, this.config.pollSeconds * 2 ** Math.min(this.failures, 5));
+      this.communicationRecovery = error instanceof CollectionError && error.communicationOnly;
+      if (this.communicationRecovery) delay = 60;
       if (error instanceof CollectionError) delay = Math.max(delay, error.retrySeconds);
     } finally {
       this.running = false;
@@ -120,12 +133,14 @@ export class Collector {
   async restart() {
     if (this.running) throw new HttpError('Messabfrage laeuft bereits. Bitte kurz warten.', 409);
     if (this.timer) clearTimeout(this.timer);
+    this.retryAbort = new AbortController();
     this.stopped = false;
     await this.poll();
   }
 
   stop() {
     this.stopped = true;
+    this.retryAbort.abort();
     this.nextPollAt = null;
     if (this.timer) clearTimeout(this.timer);
   }
@@ -137,12 +152,13 @@ export class Collector {
       try {
         return await this.api.read(device);
       } catch (error) {
-        const retryDelay = COMMUNICATION_RETRIES[attempt];
-        const communicationError = error instanceof HeatingError && error.status === 400
-          && error.message.includes('DEVICE_COMMUNICATION_ERROR');
-        if (!communicationError || retryDelay === undefined) throw error;
-        logger.warn(`${label} · Gerätekommunikation fehlgeschlagen (Versuch ${attempt + 1}/${COMMUNICATION_RETRIES.length + 1}) · erneuter Versuch in ${retryDelay}s.`);
-        await this.sleep(retryDelay * 1000);
+        const retryDelay = this.communicationRecovery ? undefined : COMMUNICATION_RETRIES[attempt];
+        if (!communicationError(error) || retryDelay === undefined || this.stopped) throw error;
+        const delay = Math.max(retryDelay, error.retrySeconds);
+        logger.warn(`${label} · Gerätekommunikation fehlgeschlagen (Versuch ${attempt + 1}/${COMMUNICATION_RETRIES.length + 1}) · erneuter Versuch in ${delay}s.`);
+        try { await this.sleep(delay * 1000, this.retryAbort.signal); }
+        catch (failure) { if (this.stopped) throw error; throw failure; }
+        if (this.stopped) throw error;
       }
     }
   }

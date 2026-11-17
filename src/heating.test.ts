@@ -105,39 +105,119 @@ test('collector retries transient Viessmann device communication errors with bou
     connected: () => true,
     read: async () => {
       attempts++;
-      if (attempts < 3) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+      if (attempts < 6) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
       return { temperatures: [temperature], schedules: [], scheduleError: null };
     },
   };
   const collector = new Collector(config, store, reader, () => 1800000000000, async delay => { delays.push(delay); });
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.equal(attempts, 3);
-  assert.deepEqual(delays, [10_000, 30_000]);
+  assert.equal(attempts, 6);
+  assert.deepEqual(delays, [2000, 5000, 10_000, 20_000, 30_000]);
   assert.equal(collector.error, null);
   assert.equal(store.sensors(first)[0]?.value, 42);
 });
 
-test('collector stops retrying after three communication failures and schedules the next poll', async t => {
+test('collector follows six communication failures with single attempts every minute and recovers', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-communication-failure-'));
   const store = new Store(directory);
   const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
   store.setDevices([first]);
   let attempts = 0;
   const delays: number[] = [];
+  let failing = true;
   const reader: HeatingReader = {
     connected: () => true,
     read: async () => {
       attempts++;
-      throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+      if (failing) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+      return { temperatures: [temperature], schedules: [], scheduleError: null };
     },
   };
   const now = 1800000000000;
   const collector = new Collector(config, store, reader, () => now, async delay => { delays.push(delay); });
   t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
   await collector.start();
-  assert.equal(attempts, 3);
-  assert.deepEqual(delays, [10_000, 30_000]);
+  assert.equal(attempts, 6);
+  assert.deepEqual(delays, [2000, 5000, 10_000, 20_000, 30_000]);
   assert.match(collector.error ?? '', /DEVICE_COMMUNICATION_ERROR/);
-  assert.equal(collector.nextPollAt, now + config.pollSeconds * 2 * 1000);
+  assert.equal(collector.nextPollAt, now + 60_000);
+  for (let index = 0; index < 3; index++) {
+    await collector.restart();
+    assert.equal(attempts, 7 + index);
+    assert.equal(delays.length, 5);
+    assert.equal(collector.nextPollAt, now + 60_000);
+  }
+  failing = false;
+  await collector.restart();
+  assert.equal(collector.error, null);
+  assert.equal(collector.nextPollAt, now + config.pollSeconds * 1000);
+  assert.equal(store.sensors(first)[0]?.value, 42);
+  failing = true;
+  await collector.restart();
+  assert.equal(attempts, 16);
+  assert.equal(delays.length, 10);
+});
+
+test('mixed failures keep normal backoff and do not retry authentication or limit errors', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'vimonitor-retry-policy-'));
+  const store = new Store(directory);
+  const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
+  store.setDevices([first, second]);
+  const now = 1800000000000;
+  const calls: string[] = [];
+  let status = 500;
+  const delays: number[] = [];
+  const reader: HeatingReader = {
+    connected: () => true,
+    read: async device => {
+      calls.push(device.installationId);
+      if (device.installationId === first.installationId) {
+        throw new HeatingError('DEVICE_COMMUNICATION_ERROR', 400);
+      }
+      throw new HeatingError('Other failure', status, status === 429 ? 7200 : 0);
+    },
+  };
+  const collector = new Collector(config, store, reader, () => now, async delay => { delays.push(delay); });
+  t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
+  await collector.start();
+  assert.equal(calls.length, 7);
+  assert.equal(collector.nextPollAt, now + 600_000);
+  for (const nextStatus of [401, 429]) {
+    status = nextStatus;
+    calls.length = 0;
+    await collector.restart();
+    assert.equal(calls.length, 7);
+    assert.equal(calls.filter(id => id === second.installationId).length, 1);
+    assert.equal(collector.nextPollAt, now + (status === 429 ? 7200_000 : 1200_000));
+  }
+});
+
+test('communication retries honor Retry-After and stopping cancels retry waits', { timeout: 3000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'vimonitor-retry-stop-'));
+  const store = new Store(directory);
+  const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
+  store.setDevices([first]);
+  let attempts = 0;
+  const reader: HeatingReader = {
+    connected: () => true,
+    read: async () => { attempts++; throw new HeatingError('DEVICE_COMMUNICATION_ERROR', 400, 120); },
+  };
+  const delays: number[] = [];
+  const collector = new Collector(config, store, reader, () => 1800000000000, async delay => { delays.push(delay); });
+  t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
+  await collector.start();
+  assert.deepEqual(delays, [120_000, 120_000, 120_000, 120_000, 120_000]);
+  assert.equal(collector.nextPollAt, 1800000120000);
+  collector.stop();
+  const stoppedCollector = new Collector(config, store, reader);
+  t.after(() => stoppedCollector.stop());
+  const pending = stoppedCollector.start();
+  await new Promise(resolve => setImmediate(resolve));
+  stoppedCollector.stop();
+  await pending;
+  await stoppedCollector.waitForIdle();
+  assert.equal(attempts, 7);
+  assert.equal(stoppedCollector.running, false);
+  assert.equal(stoppedCollector.nextPollAt, null);
 });
