@@ -92,7 +92,8 @@ select{max-width:100%;width:100%;min-width:0;background:#fafbfc;border:1px solid
 .comparison{margin-top:22px}
 .compare-picker{border:0;padding:0;margin:24px 0}
 .compare-picker legend{font-size:12px;color:#75808c;margin-bottom:12px}
-.compare-sensors{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:8px 18px}
+.compare-sensors{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:8px 18px;max-height:240px;overflow-y:auto;overscroll-behavior:contain;padding:2px 6px 2px 2px}
+.compare-sensors:focus-visible{outline:2px solid #269c9b;outline-offset:2px}
 .compare-choice{--line-color:#e6744a;display:flex;align-items:flex-start;gap:8px;font-size:11px;color:#65717d;line-height:1.6;cursor:pointer;overflow-wrap:anywhere;min-width:0}
 .compare-choice input{accent-color:var(--line-color);margin:4px 0 0;flex-shrink:0}
 .compare-choice::before{content:"";width:18px;border-top:3px solid var(--line-color);margin-top:10px;flex-shrink:0}
