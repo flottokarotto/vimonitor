@@ -69,11 +69,12 @@ export class Collector {
               const { temperatures, schedules, scheduleError } = await this.readDevice(device, labels.get(deviceKey(device)) ?? device.name);
               if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
               const timestamp = this.now();
-              this.store.saveReadings(device, timestamp, temperatures);
+              this.store.saveSnapshot(device, temperatures, {
+                timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError,
+              });
               collectedDevices++;
               collectedSensors += temperatures.length;
               if (scheduleError) logger.warn(`Zeitprogramme · ${device.name} · ${scheduleError}`);
-              this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
               const label = labels.get(deviceKey(device)) ?? device.name;
@@ -168,12 +169,11 @@ export class Collector {
       const localHour = local.hour + local.minute / 60;
       const water = localHour >= 22 ? 52 - (localHour - 22) * 0.7
         : localHour < 5 ? 52 - (localHour + 2) * 0.7 : 52 + 0.4 * Math.sin(hour);
-      this.store.saveReadings(device, time, [
+      this.store.saveSnapshot(device, [
         { sensor: 'demo.flow', label: 'Vorlauf', kind: 'flow', value: 38 + 7 * Math.sin(hour / 3) + 2 * Math.sin(hour * 4) },
         { sensor: 'demo.water', label: 'Warmwasser', kind: 'water', value: water },
         { sensor: 'demo.outside', label: 'Aussentemperatur', kind: 'other', value: 7 + 4 * Math.sin(hour / 4) },
-      ]);
-      this.store.saveSchedules(device, { timestamp: time, pollSeconds: 300, schedules, error: null });
+      ], { timestamp: time, pollSeconds: 300, schedules, error: null });
     }
     this.store.saveSchedules(device, { timestamp: this.now(), pollSeconds: this.config.pollSeconds, schedules, error: null });
   }

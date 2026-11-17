@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from './store.ts';
 import { deviceKey } from './model.ts';
+import { backupDatabase, checkDatabase } from './database-backup.ts';
+import { Collector } from './collector.ts';
+import { loadConfig } from './config.ts';
 
 const device = { installationId: '1', gatewaySerial: '2', deviceId: '0', name: 'Test' };
 const secondDevice = { installationId: '2', gatewaySerial: '3', deviceId: '0', name: 'Second' };
@@ -49,7 +52,7 @@ test('legacy single selection becomes a multi-selection without losing the activ
   } finally { store.close(); }
 });
 
-test('new live and demo databases have schema version 1 and reopen unchanged', t => {
+test('new live and demo databases have schema version 2 and reopen unchanged', t => {
   const { directory } = fixture(t);
   for (const demo of [false, true]) {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -61,9 +64,9 @@ test('new live and demo databases have schema version 1 and reopen unchanged', t
       const db = new DatabaseSync(join(directory, demo ? 'demo.sqlite' : 'vimonitor.sqlite'));
       try {
         assert.equal(db.prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal');
-        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 1);
-        assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table'").get()?.n, 4);
-        assert.ok(db.prepare("SELECT name FROM sqlite_schema WHERE name = 'readings_time'").get());
+        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 2);
+        assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table'").get()?.n, 8);
+        assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
       } finally { db.close(); }
     }
   }
@@ -111,7 +114,7 @@ for (const withSchedules of [false, true]) {
     } finally { store.close(); }
     const migrated = new DatabaseSync(path);
     try {
-      assert.equal(migrated.prepare('PRAGMA user_version').get()?.user_version, 1);
+      assert.equal(migrated.prepare('PRAGMA user_version').get()?.user_version, 2);
       assert.equal(migrated.prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal');
     }
     finally { migrated.close(); }
@@ -122,12 +125,12 @@ test('newer schema version is rejected without changing schema or data', t => {
   const { directory, path } = fixture(t);
   const db = new DatabaseSync(path);
   try {
-    db.exec("CREATE TABLE future (value TEXT); INSERT INTO future VALUES ('keep'); PRAGMA user_version = 2;");
+    db.exec("CREATE TABLE future (value TEXT); INSERT INTO future VALUES ('keep'); PRAGMA user_version = 3;");
   } finally { db.close(); }
-  assert.throws(() => new Store(directory), /Schema-Version 2/);
+  assert.throws(() => new Store(directory), /Schema-Version 3/);
   const unchanged = new DatabaseSync(path);
   try {
-    assert.equal(unchanged.prepare('PRAGMA user_version').get()?.user_version, 2);
+    assert.equal(unchanged.prepare('PRAGMA user_version').get()?.user_version, 3);
     assert.equal(unchanged.prepare('SELECT value FROM future').get()?.value, 'keep');
     assert.equal(unchanged.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table'").get()?.n, 1);
   } finally { unchanged.close(); }
@@ -145,4 +148,204 @@ test('failed migration rolls back earlier DDL and leaves version unchanged', t =
     assert.deepEqual(unchanged.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map(row => row.name), ['readings']);
     unchanged.exec('BEGIN IMMEDIATE; ROLLBACK;');
   } finally { unchanged.close(); }
+});
+
+test('version 1 migration preserves selected order, active device, deselected history and snapshots', t => {
+  const { directory, path } = fixture(t);
+  const keyStore = new Store(directory);
+  keyStore.close();
+  rmSync(path);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`${legacySchema}
+      CREATE TABLE schedule_snapshots (
+        device TEXT NOT NULL, timestamp INTEGER NOT NULL, poll_seconds INTEGER NOT NULL,
+        schedules TEXT NOT NULL, error TEXT, PRIMARY KEY(device, timestamp)
+      ); PRAGMA user_version = 1;`);
+    db.prepare('INSERT INTO settings VALUES (?, ?)').run('devices', JSON.stringify([secondDevice, device]));
+    db.prepare('INSERT INTO settings VALUES (?, ?)').run('device', JSON.stringify(device));
+    db.prepare('INSERT INTO settings VALUES (?, ?)').run('tokens', 'keep-encrypted-value');
+    const historical = { ...device, deviceId: 'historical' };
+    for (const item of [device, secondDevice, historical]) {
+      db.prepare('INSERT INTO sensors VALUES (?, ?, ?, ?)').run(deviceKey(item), 'water', 'Warmwasser', 'water');
+      db.prepare('INSERT INTO readings VALUES (?, ?, ?, ?)').run(deviceKey(item), 'water', 1000, 51);
+      for (const timestamp of [1000, 2000]) {
+        db.prepare('INSERT INTO schedule_snapshots VALUES (?, ?, ?, ?, ?)')
+          .run(deviceKey(item), timestamp, 300, '[]', timestamp === 2000 ? 'offline' : null);
+      }
+    }
+  } finally { db.close(); }
+  const store = new Store(directory);
+  try {
+    assert.deepEqual(store.getDevices(), [secondDevice, device]);
+    assert.deepEqual(store.getDevice(), device);
+    assert.equal(store.getSetting('tokens'), 'keep-encrypted-value');
+    assert.equal(store.readings({ ...device, deviceId: 'historical' }, 'water', 0, 3000)[0]?.value, 51);
+    assert.deepEqual(store.scheduleSnapshots(device, 0, 3000).map(item => item.error), [null, 'offline']);
+  } finally { store.close(); }
+  const normalized = new DatabaseSync(path);
+  try {
+    assert.equal(normalized.prepare('SELECT count(*) AS n FROM readings').get()?.n, 3);
+    assert.equal(normalized.prepare('SELECT count(*) AS n FROM schedule_programs').get()?.n, 3);
+    assert.equal(normalized.prepare('SELECT count(*) AS n FROM schedule_snapshots').get()?.n, 6);
+    assert.equal(normalized.prepare("SELECT count(*) AS n FROM settings WHERE key IN ('device','devices')").get()?.n, 0);
+    const tables = normalized.prepare("PRAGMA table_list").all().filter(row => !String(row.name).startsWith('sqlite_'));
+    assert.ok(tables.every(row => row.strict === 1));
+    checkDatabase(normalized);
+  } finally { normalized.close(); }
+  const backups = join(directory, 'backups');
+  const original = new DatabaseSync(join(backups, readdirSync(backups)[0]!, 'vimonitor.sqlite'), { readOnly: true });
+  try {
+    assert.equal(original.prepare('PRAGMA user_version').get()?.user_version, 1);
+    assert.equal(original.prepare('SELECT count(*) AS n FROM readings').get()?.n, 3);
+    checkDatabase(original);
+  } finally { original.close(); }
+});
+
+test('constraints reject orphan rows, invalid values and cross-device schedules', t => {
+  const { directory, path } = fixture(t);
+  const store = new Store(directory);
+  try {
+    store.saveSnapshot(device, [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 }],
+      { timestamp: 1000, pollSeconds: 300, schedules: [], error: null });
+    store.saveSchedules(secondDevice, { timestamp: 1000, pollSeconds: 300, schedules: [], error: null });
+    const db = new DatabaseSync(path);
+    try {
+      db.exec('PRAGMA foreign_keys = ON');
+      assert.throws(() => db.exec("INSERT INTO readings VALUES (999, 1000, 42)"), /FOREIGN KEY/);
+      assert.throws(() => db.exec("INSERT INTO readings VALUES (1, -1, 42)"), /CHECK/);
+      assert.throws(() => db.exec("INSERT INTO readings VALUES (1, 1001, 'not a temperature')"), /REAL/);
+      assert.throws(() => db.prepare('INSERT INTO readings VALUES (1, 1001, ?)').run(Infinity), /CHECK/);
+      assert.throws(() => db.exec("UPDATE sensors SET kind = 'invalid'"), /CHECK/);
+      assert.throws(() => db.exec("UPDATE schedule_snapshots SET poll_seconds = 0"), /CHECK/);
+      assert.throws(() => db.exec("UPDATE schedule_programs SET schedules = '{}'"), /CHECK/);
+      assert.throws(() => db.exec("UPDATE schedule_snapshots SET program_id = 2 WHERE device_id = 1"), /FOREIGN KEY/);
+      assert.throws(() => db.exec('DELETE FROM sensors'), /FOREIGN KEY/);
+      assert.throws(() => db.exec('INSERT INTO active_device VALUES (2, 1)'), /CHECK/);
+      checkDatabase(db);
+    } finally { db.close(); }
+  } finally { store.close(); }
+});
+
+test('snapshot writes roll back temperatures, sensor metadata and programs together', t => {
+  const { directory, path } = fixture(t);
+  const store = new Store(directory);
+  try {
+    store.setDevice(device);
+    const temperature = { sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 } as const;
+    store.saveSnapshot(device, [temperature], { timestamp: 1000, pollSeconds: 300, schedules: [], error: null });
+    assert.throws(() => store.saveSnapshot(device, [{ ...temperature, label: 'changed', value: 43 }],
+      { timestamp: 2000, pollSeconds: 0, schedules: [], error: null }), /Ungueltiger/);
+    assert.equal(store.sensors(device)[0]?.label, 'Vorlauf');
+    assert.deepEqual(store.readings(device, 'flow', 0, 3000), [{ timestamp: 1000, value: 42 }]);
+    assert.equal(store.scheduleSnapshots(device, 0, 3000).length, 1);
+    assert.throws(() => store.saveReadings(device, 2000, [temperature, { ...temperature, value: NaN }]), /Temperaturwert/);
+    assert.throws(() => store.setDevices([secondDevice, secondDevice]), /UNIQUE/);
+    assert.deepEqual(store.getDevices(), [device]);
+    assert.deepEqual(store.getDevice(), device);
+    const db = new DatabaseSync(path);
+    try { checkDatabase(db); }
+    finally { db.close(); }
+  } finally { store.close(); }
+});
+
+test('collector reports a storage failure without committing half a measurement', async t => {
+  const { directory, path } = fixture(t);
+  const store = new Store(directory);
+  const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
+  const collector = new Collector(config, store, {
+    connected: () => true,
+    read: async () => ({
+      temperatures: [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 }],
+      schedules: [], scheduleError: null,
+    }),
+  }, () => 1000);
+  try {
+    store.setDevice(device);
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(`CREATE TRIGGER reject_snapshot BEFORE INSERT ON schedule_snapshots
+        BEGIN SELECT RAISE(ABORT, 'test snapshot failure'); END;`);
+    } finally { db.close(); }
+    await collector.start();
+    assert.match(collector.error ?? '', /test snapshot failure/);
+    assert.equal(store.sensors(device).length, 0);
+    assert.equal(store.scheduleSnapshots(device, 0, 3000).length, 0);
+  } finally { collector.stop(); store.close(); }
+});
+
+test('online backup includes WAL commits and restores tokens, selection and history', t => {
+  const { directory, path } = fixture(t);
+  const store = new Store(directory);
+  const target = join(directory, 'snapshot');
+  try {
+    store.setDevice(device);
+    store.saveSecret({ token: 'test-token' });
+    store.saveSnapshot(device, [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 }],
+      { timestamp: 1000, pollSeconds: 300, schedules: [], error: null });
+    backupDatabase(path, target);
+    store.saveReadings(device, 2000, [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 43 }]);
+    assert.throws(() => backupDatabase(path, target), /EEXIST/);
+    const restored = new Store(target);
+    try {
+      assert.deepEqual(restored.loadSecret(), { token: 'test-token' });
+      assert.deepEqual(restored.getDevice(), device);
+      assert.deepEqual(restored.readings(device, 'flow', 0, 3000), [{ timestamp: 1000, value: 42 }]);
+      assert.equal(restored.scheduleSnapshots(device, 0, 3000).length, 1);
+    } finally { restored.close(); }
+    assert.equal(store.readings(device, 'flow', 0, 3000).length, 2);
+  } finally { store.close(); }
+});
+
+test('orphaned legacy readings abort migration instead of disappearing', t => {
+  const { directory, path } = fixture(t);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(legacySchema);
+    db.prepare('INSERT INTO readings VALUES (?, ?, ?, ?)').run(deviceKey(device), 'missing-sensor', 1000, 42);
+  } finally { db.close(); }
+  assert.throws(() => new Store(directory), /CHECK/);
+  const unchanged = new DatabaseSync(path);
+  try {
+    assert.equal(unchanged.prepare('PRAGMA user_version').get()?.user_version, 0);
+    assert.equal(unchanged.prepare('SELECT count(*) AS n FROM readings').get()?.n, 1);
+    assert.equal(unchanged.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'devices'").get()?.n, 0);
+  } finally { unchanged.close(); }
+});
+
+test('a failed pre-migration backup prevents all schema changes', t => {
+  const { directory, path } = fixture(t);
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(legacySchema);
+    db.prepare('INSERT INTO settings VALUES (?, ?)').run('preserved', 'yes');
+  } finally { db.close(); }
+  writeFileSync(join(directory, 'backups'), 'not a directory');
+  assert.throws(() => new Store(directory), /EEXIST/);
+  const unchanged = new DatabaseSync(path);
+  try {
+    assert.equal(unchanged.prepare('PRAGMA user_version').get()?.user_version, 0);
+    assert.equal(unchanged.prepare('SELECT value FROM settings WHERE key = ?').get('preserved')?.value, 'yes');
+    assert.equal(unchanged.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'schedule_snapshots'").get()?.n, 0);
+  } finally { unchanged.close(); }
+});
+
+test('time-range queries use the normalized primary keys rather than full scans', t => {
+  const { directory, path } = fixture(t);
+  const store = new Store(directory);
+  try {
+    store.saveSnapshot(device, [{ sensor: 'flow', label: 'Vorlauf', kind: 'flow', value: 42 }],
+      { timestamp: 1000, pollSeconds: 300, schedules: [], error: null });
+    const db = new DatabaseSync(path);
+    try {
+      const history = db.prepare(`EXPLAIN QUERY PLAN SELECT timestamp, value FROM readings
+        WHERE sensor_id = (SELECT id FROM sensors WHERE device_id = ? AND sensor = ?)
+        AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp`).all(1, 'flow', 0, 3000);
+      assert.ok(history.some(row => /SEARCH readings USING PRIMARY KEY/.test(String(row.detail))));
+      assert.ok(history.some(row => /SEARCH sensors USING COVERING INDEX/.test(String(row.detail))));
+      const schedules = db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM schedule_snapshots
+        WHERE device_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp`).all(1, 0, 3000);
+      assert.ok(schedules.some(row => /SEARCH schedule_snapshots USING PRIMARY KEY/.test(String(row.detail))));
+    } finally { db.close(); }
+  } finally { store.close(); }
 });

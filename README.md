@@ -281,24 +281,54 @@ data/
 ```
 
 SQLite wird fuer Echt- und Demo-Datenbanken immer im **WAL-Modus** betrieben,
-bereits vor Schema-Migrationen. Bei jedem Oeffnen wird der Modus gesetzt und
+vor Anwendung von Schema-Migrationen. Bei jedem Oeffnen wird der Modus gesetzt und
 geprueft; kann WAL nicht aktiviert werden, bricht der Start mit einer
 Fehlermeldung ab. Dabei koennen zusaetzlich `-wal`- und `-shm`-Dateien entstehen.
-Die Tabellen
-`readings`, `sensors`, `settings` und `schedule_snapshots` enthalten die
-Messhistorie, Sensor-Metadaten, lokale Einstellungen und beobachtete
-Zeitprogramme. Messwerte sind pro Geraet, Sensor und Abrufzeitpunkt eindeutig.
+`synchronous=FULL` sichert bestaetigte Transaktionen auch bei Stromausfall ab,
+soweit Betriebssystem und Speichermedium die Synchronisierung korrekt umsetzen.
+Ein `busy_timeout` von fuenf Sekunden puffert kurzzeitige Schreibsperren.
 
-Die Schema-Version steht in SQLite unter `PRAGMA user_version` (aktuell **1**),
+Das normalisierte Schema verwendet:
+
+- `devices`: Geraete mit numerischem Primaerschluessel und eindeutiger Kombination
+  aus Installation, Gateway und Geraetekennung.
+- `selected_devices` und `active_device`: geordnete Erfassungsauswahl und aktive
+  Heizung; eine aktive Heizung muss zur Auswahl gehoeren.
+- `sensors`: Sensor-Metadaten pro Geraet, mit numerischen IDs.
+- `readings`: Rohmesswerte, eindeutig nach Sensor-ID und UTC-Zeitstempel in
+  Millisekunden. Der Primaerschluessel unterstuetzt Bereichsabfragen direkt.
+- `schedule_programs`: pro Geraet deduplizierte Zeitprogramm-JSON-Dokumente.
+- `schedule_snapshots`: jeder beobachtete Zeitpunkt mit Programmreferenz,
+  Abfrageintervall und etwaigem Fehler; auch unveraenderte Programme werden
+  weiterhin zeitlich lueckenlos nachgewiesen.
+- `settings`: lokale Einstellungen und verschluesselte Tokens, keine Geraetewahl.
+
+Alle Tabellen sind `STRICT`. Fremdschluessel verhindern verwaiste Messwerte
+und geraetefremde Programmzuordnungen. `CHECK`-Regeln begrenzen Sensortypen,
+Zeitstempel, endliche Messwerte, positive Abfrageintervalle und gueltige
+Zeitprogramm-JSON-Arrays. Messwerte und Zeitprogramme einer erfolgreichen
+Geraeteabfrage werden in **einer Transaktion** gespeichert. Nur identische
+Messschluessel werden gezielt ignoriert; andere Constraint-Verletzungen sind
+Fehler. Historien bleiben beim Abwaehlen oder erneuten Anmelden erhalten.
+
+Die Schema-Version steht in SQLite unter `PRAGMA user_version` (aktuell **2**),
 unabhaengig von der App-Version. Beim Start werden ausstehende Migrationen in
 einer gemeinsamen Transaktion angewendet. Bisherige unversionierte Datenbanken
-(Version 0), auch ohne `schedule_snapshots`, werden automatisch und ohne Loeschen
-vorhandener Daten uebernommen. Bei Fehlern werden Schema-Aenderungen und
+(Version 0), auch ohne `schedule_snapshots`, und Version 1 werden automatisch
+uebernommen. Vor der Migration einer vorhandenen Datenbank wird unter
+`DATA_DIR/backups/` ein konsistentes, integritaetsgeprueftes Backup inklusive
+`token.key` angelegt. Schlaegt die Sicherung fehl, startet die Migration nicht.
+Zeilenanzahlen, Datenbankintegritaet und Fremdschluessel werden beim Umstieg
+geprueft. Ungueltige Altdaten fuehren zum Abbruch, nicht zu stiller Bereinigung.
+Bei Fehlern werden Schema-Aenderungen und
 Versionsnummer gemeinsam zurueckgerollt; neuere, nicht unterstuetzte
 Schema-Versionen verhindern den Start mit einer Fehlermeldung. Das gilt fuer
-Echt- und Demo-Datenbanken. Vor Updates das Datenverzeichnis bei beendeter App
-sichern. Kuenftige Schema-Aenderungen werden als weitere Migration am Ende von
+Echt- und Demo-Datenbanken. **Vor Updates alle laufenden ViMonitor-Prozesse
+beenden**, damit kein alter Prozess nach dem Umstieg auf das alte Schema zugreift.
+Kuenftige Schema-Aenderungen werden als weitere Migration am Ende von
 `migrations` in `src/store.ts` ergaenzt; bestehende Migrationen bleiben unveraendert.
+Version 2 ist in `src/schema.ts` definiert. Ein Downgrade auf eine App mit
+Schema-Version 1 benoetigt das Backup vor der Migration.
 
 `.env`, das gesamte Datenverzeichnis, Datenbankdateien und Logs werden von Git
 ausgeschlossen. Vor eigenen Commits trotzdem `git status` pruefen, besonders bei
@@ -312,9 +342,35 @@ unter Windows nur dem eigenen Benutzer zugaenglich machen (Dateieigenschaften >
 Sicherheit), insbesondere auf gemeinsam genutzten Rechnern. Es werden keine
 Analyse-, CDN- oder Telemetriedienste eingebunden. Chart.js wird lokal ausgeliefert.
 
-Fuer ein konsistentes Backup die App stoppen und das gesamte Datenverzeichnis
-einschliesslich `token.key` an einen geschuetzten Ort kopieren. Ohne den
+### Backup und Wiederherstellung
+
+Nach `npm run build` kann auch bei laufender Erfassung ein konsistenter
+SQLite-Snapshot erstellt werden (einschliesslich bereits bestaetigter WAL-Daten):
+
+```powershell
+npm run backup -- C:\ViMonitor-Backups\2026-11-17
+```
+
+Das Ziel muss neu sein; vorhandene Verzeichnisse werden nicht ueberschrieben.
+Die Auswahl von Echt- oder Demo-Datenbank richtet sich wie beim Server nach
+`.env`/`DEMO_MODE` und `DATA_DIR`. `VACUUM INTO` erstellt den Snapshot;
+`integrity_check` und `foreign_key_check` pruefen ihn. Gesichert werden die
+gewaehlte Datenbank und `token.key`, nicht `.env` oder die jeweils andere
+Datenbank. Beide Datenbanken bei Bedarf getrennt sichern. Ein fehlgeschlagenes
+Backup wird ausdruecklich gemeldet; ein eventuell angelegtes unvollstaendiges
+Zielverzeichnis ist kein gueltiges Backup.
+
+Zur Wiederherstellung alle App-Prozesse beenden, `.env` behalten und `DATA_DIR`
+auf ein separates Wiederherstellungsverzeichnis mit der gesicherten Datenbank
+und `token.key` setzen. Keine alten `-wal`-/`-shm`-Dateien dazumischen. Erst nach
+Pruefung der Historien die bisherige Datenkopie ersetzen. Ohne den passenden
 Schluessel koennen vorhandene Tokens nicht wiederhergestellt werden.
+
+Backups und Schluessel nur in geschuetzten Verzeichnissen ausserhalb des Repos
+aufbewahren; automatische Migrationsbackups ersetzen keine regelmaessige
+Sicherung auf einem anderen Datentraeger. Es gibt bewusst keine automatische
+Loeschung oder Verdichtung der Rohmesswerte und keine automatische Loeschung
+alter Backups. Den Speicherverbrauch deshalb regelmaessig kontrollieren.
 
 ## Entwicklung und Tests
 
