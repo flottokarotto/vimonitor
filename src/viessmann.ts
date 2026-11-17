@@ -16,6 +16,30 @@ function retryAfter(response: Response): number {
   return Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
 }
 
+async function errorDetail(response: Response): Promise<string> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return '';
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return '';
+  const fields = body as Record<string, unknown>;
+  const details: string[] = [];
+  for (const key of ['error', 'error_description', 'message', 'description', 'detail', 'errorType', 'errorCode']) {
+    const value = fields[key];
+    if (typeof value === 'string' && value.trim()) details.push(value.trim());
+    else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const nested = value as Record<string, unknown>;
+      for (const nestedKey of ['code', 'message', 'description']) {
+        const nestedValue = nested[nestedKey];
+        if (typeof nestedValue === 'string' && nestedValue.trim()) details.push(nestedValue.trim());
+      }
+    }
+  }
+  return [...new Set(details)].join(': ').slice(0, 300);
+}
+
 export class ApiError extends HeatingError {}
 
 interface Tokens {
@@ -74,7 +98,11 @@ export class Viessmann implements HeatingService {
     });
     if (!response.ok) {
       if (fields.grant_type === 'refresh_token' && [400, 401].includes(response.status)) this.store.clearSecret();
-      throw new ApiError(`Viessmann-Anmeldung fehlgeschlagen (HTTP ${response.status}). Bitte erneut verbinden.`, response.status, retryAfter(response));
+      const detail = await errorDetail(response);
+      throw new ApiError(
+        `Viessmann-Anmeldung fehlgeschlagen (HTTP ${response.status})${detail ? `: ${detail}` : ''}. Bitte erneut verbinden.`,
+        response.status, retryAfter(response),
+      );
     }
     const data = record(await response.json());
     if (typeof data.access_token !== 'string' || typeof data.expires_in !== 'number' || data.expires_in <= 0) {
@@ -112,8 +140,9 @@ export class Viessmann implements HeatingService {
       response = await send();
     }
     if (!response.ok) {
+      const detail = await errorDetail(response);
       throw new ApiError(
-        `Viessmann-API: HTTP ${response.status}${response.status === 429 ? ' (Abfragelimit erreicht)' : ''}.`,
+        `Viessmann-API: HTTP ${response.status}${response.status === 429 ? ' (Abfragelimit erreicht)' : ''}${detail ? `: ${detail}` : ''}.`,
         response.status, retryAfter(response),
       );
     }

@@ -49,6 +49,21 @@ test('Viessmann client works with an independent token store and retries an unau
   });
 });
 
+test('Viessmann API errors include a bounded response detail without exposing other fields', async () => {
+  const saved = memoryTokens({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3600_000 });
+  const client = new Viessmann({ clientId: 'client', redirectUri: 'http://localhost/callback' }, saved, async () =>
+    Response.json({
+      error: { code: 'invalid_device', message: 'Feature endpoint unavailable' },
+      access_token: 'must-not-be-shown',
+    }, { status: 400 }));
+  await assert.rejects(client.read(first), (error: unknown) =>
+    error instanceof HeatingError
+    && error.status === 400
+    && error.message.includes('invalid_device')
+    && error.message.includes('Feature endpoint unavailable')
+    && !error.message.includes('must-not-be-shown'));
+});
+
 test('collector depends on the heating reader and respects rate limits across devices', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'vimonitor-reader-test-'));
   const store = new Store(directory);
