@@ -14,7 +14,7 @@ export function chartSeries(title: string, points: TerminalPoint[], maxPoints = 
   if (points.length <= maxPoints) {
     return {
       title,
-      x: points.map((point, index) => index % 8 === 0 ? new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''),
+      x: points.map(point => new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })),
       y: points.map(point => point.value),
     };
   }
@@ -31,7 +31,7 @@ export function chartSeries(title: string, points: TerminalPoint[], maxPoints = 
   }
   return {
     title,
-    x: sampled.map((point, index) => index % 6 === 0 ? new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''),
+    x: sampled.map(point => new Date(point.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })),
     y: sampled.map(point => point.value),
   };
 }

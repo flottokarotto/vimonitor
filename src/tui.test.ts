@@ -4,6 +4,7 @@ import { PassThrough } from 'node:stream';
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
 import { createTerminalChooser } from './tui.ts';
+import { chartSeries } from './tui-model.ts';
 
 function terminal() {
   const input = new PassThrough();
@@ -73,4 +74,25 @@ test('terminal chart baseline renders without undefined ANSI colors', t => {
   screen.render();
   assert.doesNotMatch(chart.getContent(), /undefined/);
   assert.match(chart.getContent(), /35|36/);
+});
+
+test('terminal time axes render real history labels without null text', t => {
+  const { screen, close } = terminal();
+  t.after(close);
+  const chart = contrib.line({
+    width: 70, height: 15,
+    style: { line: 'cyan', text: 'white', baseline: 'white' },
+  });
+  screen.append(chart);
+  for (const count of [26, 601]) {
+    const points = Array.from({ length: count }, (_, index) => ({
+      timestamp: 1800000000000 + index * 300_000,
+      value: 35 + index / count,
+    }));
+    const series = chartSeries('Vorlauf', points);
+    chart.setData([series]);
+    screen.render();
+    assert.doesNotMatch(chart.getContent(), /null|undefined/);
+    assert.match(chart.getContent(), /\d{2}:\d{2}/);
+  }
 });
