@@ -93,3 +93,51 @@ test('collector depends on the heating reader and respects rate limits across de
   assert.match(collector.error ?? '', /Abfragelimit/);
   assert.equal(collector.nextPollAt, now + 7200_000);
 });
+
+test('collector retries transient Viessmann device communication errors with bounded backoff', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'vimonitor-communication-retry-'));
+  const store = new Store(directory);
+  const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
+  store.setDevices([first]);
+  let attempts = 0;
+  const delays: number[] = [];
+  const reader: HeatingReader = {
+    connected: () => true,
+    read: async () => {
+      attempts++;
+      if (attempts < 3) throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+      return { temperatures: [temperature], schedules: [], scheduleError: null };
+    },
+  };
+  const collector = new Collector(config, store, reader, () => 1800000000000, async delay => { delays.push(delay); });
+  t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
+  await collector.start();
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [10_000, 30_000]);
+  assert.equal(collector.error, null);
+  assert.equal(store.sensors(first)[0]?.value, 42);
+});
+
+test('collector stops retrying after three communication failures and schedules the next poll', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'vimonitor-communication-failure-'));
+  const store = new Store(directory);
+  const config = loadConfig({ DEMO_MODE: 'false', VIESSMANN_CLIENT_ID: 'test', DATA_DIR: directory });
+  store.setDevices([first]);
+  let attempts = 0;
+  const delays: number[] = [];
+  const reader: HeatingReader = {
+    connected: () => true,
+    read: async () => {
+      attempts++;
+      throw new HeatingError('Viessmann-API: HTTP 400: DEVICE_COMMUNICATION_ERROR.', 400);
+    },
+  };
+  const now = 1800000000000;
+  const collector = new Collector(config, store, reader, () => now, async delay => { delays.push(delay); });
+  t.after(() => { collector.stop(); store.close(); rmSync(directory, { recursive: true }); });
+  await collector.start();
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [10_000, 30_000]);
+  assert.match(collector.error ?? '', /DEVICE_COMMUNICATION_ERROR/);
+  assert.equal(collector.nextPollAt, now + config.pollSeconds * 2 * 1000);
+});

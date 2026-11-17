@@ -163,6 +163,12 @@ simulierte API-Antworten; im Demo-Modus sind alle Werte synthetisch.
 - Abfragen laufen nicht parallel. Fehler erzeugen keine Ersatzmesswerte.
   Wiederholungsversuche erfolgen mit wachsender Pause bis zu einer Stunde;
   ein laengeres `Retry-After` der API wird ebenfalls beachtet.
+- Bei `DEVICE_COMMUNICATION_ERROR` wird dasselbe Geraet zusaetzlich sofort nach
+  10 und 30 Sekunden erneut abgefragt. Schlaegt auch der dritte Versuch fehl,
+  folgt der regulaere, mit Fehlern wachsende Abfrageabstand.
+- Die Konsolenausgabe enthaelt lokale Zeitstempel, Schweregrade und farbige
+  Meldungen in Terminals, die ANSI-Farben unterstuetzen. `NO_COLOR` deaktiviert
+  die Farben; `FORCE_COLOR=1` erzwingt sie.
 - Daten aelter als 2,5 Abfrageintervalle werden als veraltet markiert.
 - Bei geschlossenem Terminal, ausgeschaltetem PC oder Standby findet keine
   Erfassung statt. Die API liefert hier nur aktuelle Werte; fehlende historische
@@ -333,6 +339,10 @@ die Nutzungsbedingungen des API-Anbieters.
 - **HTTP 403 von Viessmann:** API-Paket, Freigaben und verwendetes Konto pruefen.
 - **HTTP 429:** Abfragelimit erreicht. Wiederholungspause abwarten, Intervall ggf.
   erhoehen und andere Apps mit demselben Konto beruecksichtigen.
+- **`DEVICE_COMMUNICATION_ERROR`:** Viessmann meldet einen Kommunikationsfehler
+  fuer das Geraet. ViMonitor versucht es nach 10 und 30 Sekunden erneut; bleiben
+  alle Versuche erfolglos, pruefe die Erreichbarkeit in ViCare und warte den
+  naechsten automatischen Abfrageversuch ab.
 - **Keine Sensoren:** anderes Geraet waehlen oder die Feature-Freigaben pruefen.
   Nicht jedes aufgefuehrte Gateway-Geraet stellt Heizungsdaten bereit.
 - **Fehler beim OAuth-Callback:** erneut unter `http://localhost:3000` anmelden.

@@ -11,6 +11,7 @@ import { HttpError } from './http-error.ts';
 import type { Device } from './model.ts';
 import { deviceKey, deviceLabels } from './model.ts';
 import { buildInsights } from './insights.ts';
+import { logger } from './logger.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -160,7 +161,9 @@ export function createApp(config: Config, store: Store, api: HeatingService, col
     const message = bodyError === 'entity.parse.failed' ? 'Ungueltiges JSON.'
       : bodyError === 'entity.too.large' ? 'Anfrage zu gross.'
         : error instanceof Error ? error.message : 'Unbekannter Serverfehler.';
-    console.error(`HTTP ${status}: ${message}`);
+    const detail = `${_req.method} ${_req.path} · HTTP ${status} · ${message}`;
+    if (status >= 500) logger.error(detail);
+    else logger.warn(detail);
     res.status(status >= 400 && status <= 599 ? status : 500).json({ error: message });
   };
   app.use(handleError);

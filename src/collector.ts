@@ -1,16 +1,23 @@
 import type { Config } from './config.ts';
 import { deviceKey, deviceLabels } from './model.ts';
+import type { Device } from './model.ts';
 import type { Store } from './store.ts';
 import { HeatingError } from './heating.ts';
 import type { HeatingReader } from './heating.ts';
 import { HttpError } from './http-error.ts';
 import { DAYS, localParts, parseSchedules } from './schedules.ts';
+import { logger } from './logger.ts';
+
+const COMMUNICATION_RETRIES = [10, 30] as const;
+type Sleep = (milliseconds: number) => Promise<void>;
 
 class CollectionError extends Error {
   retrySeconds: number;
-  constructor(message: string, retrySeconds: number) {
+  failedDevices: string[];
+  constructor(message: string, retrySeconds: number, failedDevices: string[]) {
     super(message);
     this.retrySeconds = retrySeconds;
+    this.failedDevices = failedDevices;
   }
 }
 
@@ -27,12 +34,15 @@ export class Collector {
   private now: () => number;
   private finished: Promise<void> = Promise.resolve();
   private resolveFinished: (() => void) | undefined;
+  private sleep: Sleep;
 
-  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now) {
+  constructor(config: Config, store: Store, api: HeatingReader, now = Date.now, sleep: Sleep = milliseconds =>
+    new Promise(resolve => setTimeout(resolve, milliseconds))) {
     this.config = config;
     this.store = store;
     this.api = api;
     this.now = now;
+    this.sleep = sleep;
   }
 
   async start() { this.stopped = false; await this.poll(); }
@@ -42,26 +52,33 @@ export class Collector {
     this.running = true;
     this.finished = new Promise(resolve => { this.resolveFinished = resolve; });
     let delay = this.config.pollSeconds;
+    let collectedDevices = 0;
+    let collectedSensors = 0;
     try {
       if (this.config.demo) {
         this.demo();
       } else {
         const failures: string[] = [];
+        const failedDevices: string[] = [];
         let retrySeconds = 0;
         const selected = this.store.getDevices();
         const labels = deviceLabels(selected);
         if (this.api.connected()) {
           for (const device of selected) {
             try {
-              const { temperatures, schedules, scheduleError } = await this.api.read(device);
+              const { temperatures, schedules, scheduleError } = await this.readDevice(device, labels.get(deviceKey(device)) ?? device.name);
               if (!temperatures.length) throw new Error('Keine freigegebenen Celsius-Sensoren gefunden. API-Paket und Geraet pruefen.');
               const timestamp = this.now();
               this.store.saveReadings(device, timestamp, temperatures);
-              if (scheduleError) console.error(`Zeitprogramme: ${scheduleError}`);
+              collectedDevices++;
+              collectedSensors += temperatures.length;
+              if (scheduleError) logger.warn(`Zeitprogramme · ${device.name} · ${scheduleError}`);
               this.store.saveSchedules(device, { timestamp, pollSeconds: this.config.pollSeconds, schedules, error: scheduleError });
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
-              failures.push(`${labels.get(deviceKey(device)) ?? device.name}: ${message}`);
+              const label = labels.get(deviceKey(device)) ?? device.name;
+              failures.push(`${label}: ${message}`);
+              failedDevices.push(label);
               if (error instanceof HeatingError && (error.status === 429 || error.status === 401)) {
                 retrySeconds = error.retrySeconds;
                 break;
@@ -69,13 +86,21 @@ export class Collector {
             }
           }
         }
-        if (failures.length) throw new CollectionError(failures.join(' | '), retrySeconds);
+        if (collectedDevices > 0) {
+          logger.info(`Messwerte erfasst · ${collectedDevices} Heizgerät(e) · ${collectedSensors} Sensorwerte.`);
+        }
+        if (failures.length) throw new CollectionError(failures.join(' | '), retrySeconds, failedDevices);
       }
       this.error = null;
       this.failures = 0;
+      if (this.config.demo) logger.info('Demo-Daten aktualisiert.');
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Unbekannter Fehler bei der Datenerfassung.';
-      console.error(`Datenerfassung: ${this.error}`);
+      if (error instanceof CollectionError) {
+        logger.error(`Datenerfassung fehlgeschlagen · ${error.failedDevices.length} Gerät(e) betroffen · ${this.error}`);
+      } else {
+        logger.error(`Datenerfassung fehlgeschlagen · ${this.error}`);
+      }
       this.failures++;
       delay = Math.min(3600, this.config.pollSeconds * 2 ** Math.min(this.failures, 5));
       if (error instanceof CollectionError) delay = Math.max(delay, error.retrySeconds);
@@ -84,6 +109,7 @@ export class Collector {
       this.resolveFinished?.();
       if (!this.stopped) {
         this.nextPollAt = this.now() + delay * 1000;
+        if (this.error) logger.info(`Nächster Messversuch um ${new Date(this.nextPollAt).toLocaleString('de-DE')} (in ${Math.ceil(delay / 60)} Min.).`);
         this.timer = setTimeout(() => { void this.poll(); }, delay * 1000);
         this.timer.unref();
       }
@@ -104,6 +130,21 @@ export class Collector {
   }
 
   async waitForIdle() { await this.finished; }
+
+  private async readDevice(device: Device, label: string) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.api.read(device);
+      } catch (error) {
+        const retryDelay = COMMUNICATION_RETRIES[attempt];
+        const communicationError = error instanceof HeatingError && error.status === 400
+          && error.message.includes('DEVICE_COMMUNICATION_ERROR');
+        if (!communicationError || retryDelay === undefined) throw error;
+        logger.warn(`${label} · Gerätekommunikation fehlgeschlagen (Versuch ${attempt + 1}/${COMMUNICATION_RETRIES.length + 1}) · erneuter Versuch in ${retryDelay}s.`);
+        await this.sleep(retryDelay * 1000);
+      }
+    }
+  }
 
   private demo() {
     const device = { installationId: 'demo', gatewaySerial: 'demo', deviceId: '0', name: 'Demo-Heizung' };
