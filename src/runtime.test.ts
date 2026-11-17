@@ -31,6 +31,10 @@ test('shared runtime serves the local API and shuts down cleanly', async t => {
   const entries: string[] = [];
   const unsubscribe = logger.subscribe(entry => entries.push(`${entry.level} ${entry.message}`), true);
   const runtime = createRuntime(config);
+  assert.equal(runtime.config, config);
+  assert.ok(runtime.store);
+  assert.ok(runtime.api);
+  assert.ok(runtime.collector);
   t.after(async () => {
     await runtime.close();
     unsubscribe();

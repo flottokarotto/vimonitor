@@ -59,5 +59,5 @@ export function createRuntime(config: Config) {
     return closing;
   }
 
-  return { app, collector, listen, close };
+  return { app, api, collector, config, store, listen, close };
 }

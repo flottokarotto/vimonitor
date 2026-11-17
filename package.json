@@ -12,7 +12,7 @@
     "dev": "npm run build:ui && node --env-file-if-exists=.env --watch src/server.ts",
     "dev:ui": "npm run build:ui -- --watch",
     "start": "node --env-file-if-exists=.env dist/server.js",
-    "tui": "node --env-file-if-exists=.env dist/tui.js",
+    "tui": "node --env-file-if-exists=.env dist/server.js --tui",
     "build": "tsc && npm run build:ui",
     "build:ui": "esbuild frontend/main.tsx --bundle --platform=browser --format=iife --target=es2022 --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" --outfile=dist-public/app.js",
     "build:ui-test": "esbuild frontend/ui.test.tsx --bundle --platform=node --packages=external --format=esm --target=node24 --jsx=automatic --outfile=dist-public/ui.test.mjs",

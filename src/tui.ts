@@ -1,11 +1,13 @@
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
 import { spawn } from 'node:child_process';
-import { loadConfig } from './config.ts';
-import { createRuntime } from './runtime.ts';
+import type { createRuntime } from './runtime.ts';
 import { logger, type LogEntry } from './logger.ts';
 import { chartSeries, terminalLog } from './tui-model.ts';
-import type { Temperature } from './model.ts';
+import { deviceKey, deviceLabels } from './model.ts';
+import type { Device, Temperature } from './model.ts';
+import { buildInsights } from './insights.ts';
+import { HttpError } from './http-error.ts';
 
 interface Point {
   timestamp: number;
@@ -28,22 +30,6 @@ interface TerminalStatus {
   collecting: boolean;
 }
 
-interface DiscoveredDevice {
-  index: number;
-  name: string;
-  deviceId: string;
-  selected: boolean;
-}
-
-interface Insights {
-  timeZone: string;
-  observedAt: number | null;
-  stale: boolean;
-  message: string;
-  lastNight: { status: string; rate: number | null; drop: number | null; startTemperature: number | null; endTemperature: number | null } | null;
-  schedules: { label: string; active: boolean; entries: Record<string, { start: string; end: string; mode: string }[]> }[];
-}
-
 interface TerminalSeries extends Temperature {
   device: string;
   key: string;
@@ -52,24 +38,10 @@ interface TerminalSeries extends Temperature {
 
 const periods = [24, 168, 720] as const;
 const periodLabels = ['24 Stunden', '7 Tage', '30 Tage'];
-const url = (port: number, path: string) => `http://127.0.0.1:${port}${path}`;
 const number = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 });
 const time = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 
-async function request<T>(port: number, path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url(port, path), init);
-  const body: unknown = await response.json();
-  if (!response.ok) {
-    const detail = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
-      ? body.error : `HTTP ${response.status}`;
-    throw new Error(detail);
-  }
-  return body as T;
-}
-
-function post(body: object): RequestInit {
-  return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
-}
+type Runtime = ReturnType<typeof createRuntime>;
 
 function colorFor(index: number): string {
   return ['cyan', 'yellow', 'green', 'magenta', 'blue', 'red', 'white', 'yellow'][index % 8]!;
@@ -85,18 +57,17 @@ function launchLogin(port: number) {
   browser.unref();
 }
 
-async function main() {
+export async function startTerminal(runtime: Runtime, onQuit: () => void): Promise<{ close(): void }> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error('Die Terminaloberfläche benötigt ein interaktives Terminal.');
   }
-  const config = loadConfig();
-  const runtime = createRuntime(config);
+  const { config, store } = runtime;
   const screen = blessed.screen({ smartCSR: true, title: 'ViMonitor · Terminal' });
   const grid = new contrib.grid({ rows: 20, cols: 12, screen });
   const header = blessed.box({
     top: 0, left: 0, width: '100%', height: 3, tags: true,
     style: { fg: 'white', bg: 'blue' },
-    content: ' ViMonitor | Terminal-Dashboard\n q Beenden  r Aktualisieren  1/2/3 Zeitraum  a Heizung  d Geräte  c Vergleich  f/w Sensor  l Login',
+    content: ' ViMonitor | Terminal-Dashboard\n q Terminal schließen  Strg+C alles beenden  r Aktualisieren  1/2/3 Zeitraum  a Heizung  d Geräte  c Vergleich  f/w Sensor  l Login',
   });
   const statusBox = blessed.box({
     top: 3, left: 0, width: '100%', height: 4, tags: true,
@@ -133,26 +104,24 @@ async function main() {
   screen.append(statusBox);
   screen.append(insightsBox);
   screen.append(logs);
-  screen.key(['q', 'C-c'], () => { void shutdown(); });
-
   const removeLogSink = logger.subscribe((entry: LogEntry) => {
     logs.log(terminalLog(entry));
     screen.render();
   }, true);
 
   let status: TerminalStatus | null = null;
-  let insights: Insights | null = null;
+  let insights: ReturnType<typeof buildInsights> | null = null;
   let hours: typeof periods[number] = 24;
   let flowSensor = '';
   let waterSensor = '';
   let comparison = new Set<string>();
   const initializedDevices = new Set<string>();
   const histories = new Map<string, Point[]>();
-  let discoveredDevices: DiscoveredDevice[] = [];
   let modal: { box: blessed.Widgets.BoxElement; list: blessed.Widgets.ListElement; close: () => void } | undefined;
   let refreshBusy = false;
   let refreshQueued = false;
   let stopped = false;
+  let timer: NodeJS.Timeout | undefined;
 
   const allSeries = (): TerminalSeries[] => (status?.devices ?? []).flatMap(device =>
     device.sensors.map(sensor => ({
@@ -193,7 +162,9 @@ async function main() {
       ? insights.schedules.map(schedule => {
         const today = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: insights?.timeZone })
           .format(Date.now()).toLowerCase();
-        const entries = schedule.entries[today] ?? [];
+        const day = (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)
+          .find(value => value === today);
+        const entries = day ? schedule.entries[day] : [];
         return `${schedule.label}${schedule.active ? '' : ' (inaktiv)'}: ${entries.length
           ? entries.map(entry => `${entry.start}-${entry.end} ${entry.mode}`).join(', ')
           : 'keine Zeitfenster'}`;
@@ -232,11 +203,17 @@ async function main() {
     wanted = new Set([...wanted].filter(item => available.has(item)));
     const results = await Promise.all([...wanted].map(async key => {
       const [device, sensor] = JSON.parse(key) as [string, string];
-      const result = await request<{ points: Point[] }>(
-        config.port,
-        `/api/history?hours=${hours}&sensor=${encodeURIComponent(sensor)}&device=${encodeURIComponent(device)}`,
-      );
-      return [key, result.points] as const;
+      const selected = store.getDevices().find(item => deviceKey(item) === device);
+      if (!selected) return [key, [] as Point[]] as const;
+      const to = Date.now();
+      const points = store.history(selected, sensor, to - hours * 3600_000, to).map(point => ({
+        timestamp: Number(point.timestamp),
+        value: Number(point.value),
+        min: Number(point.min),
+        max: Number(point.max),
+        count: Number(point.count),
+      }));
+      return [key, points] as const;
     }));
     histories.clear();
     for (const [key, points] of results) histories.set(key, points);
@@ -265,9 +242,36 @@ async function main() {
     }
     refreshBusy = true;
     try {
-      status = await request<TerminalStatus>(config.port, '/api/status');
-      if (status.activeDevice) {
-        const active = status.devices.find(device => device.id === status?.activeDevice);
+      const selected = store.getDevices();
+      const labels = deviceLabels(selected);
+      const activeDevice = store.getDevice();
+      const activeKey = activeDevice ? deviceKey(activeDevice) : null;
+      const readSensors = (device: Device): (Temperature & { timestamp: number })[] => store.sensors(device).map(sensor => ({
+        sensor: String(sensor.sensor),
+        label: String(sensor.label),
+        kind: sensor.kind === 'flow' || sensor.kind === 'water' ? sensor.kind : 'other',
+        value: Number(sensor.value),
+        timestamp: Number(sensor.timestamp),
+      }));
+      const currentStatus: TerminalStatus = {
+        demo: config.demo,
+        connected: config.demo || runtime.api.connected(),
+        device: activeDevice ? { name: labels.get(deviceKey(activeDevice)) ?? activeDevice.name } : null,
+        devices: selected.map(device => ({
+          id: deviceKey(device),
+          name: labels.get(deviceKey(device)) ?? device.name,
+          sensors: readSensors(device),
+        })),
+        activeDevice: activeKey,
+        sensors: activeDevice ? readSensors(activeDevice) : [],
+        pollSeconds: config.pollSeconds,
+        error: runtime.collector.error,
+        nextPollAt: runtime.collector.nextPollAt,
+        collecting: runtime.collector.running,
+      };
+      status = currentStatus;
+      if (currentStatus.activeDevice) {
+        const active = currentStatus.devices.find(device => device.id === currentStatus.activeDevice);
         const choose = (kind: 'flow' | 'water', current: string) => active?.sensors.some(sensor => sensor.sensor === current)
           ? current : active?.sensors.find(sensor => sensor.kind === kind)?.sensor ?? '';
         flowSensor = choose('flow', flowSensor);
@@ -276,7 +280,7 @@ async function main() {
       const series = allSeries();
       const available = new Set(series.map(item => item.key));
       comparison = new Set([...comparison].filter(key => available.has(key)));
-      for (const device of status.devices) {
+      for (const device of currentStatus.devices) {
         if (initializedDevices.has(device.id) || !device.sensors.length) continue;
         for (const kind of ['flow', 'water'] as const) {
           const sensor = device.sensors.find(item => item.kind === kind);
@@ -285,7 +289,7 @@ async function main() {
         initializedDevices.add(device.id);
       }
       try {
-        insights = await request<Insights>(config.port, '/api/insights');
+        insights = buildInsights(store, activeDevice);
       } catch (error) {
         logger.warn(`Auswertung konnte nicht geladen werden: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -369,14 +373,23 @@ async function main() {
       return;
     }
     try {
-      const result = await request<{ devices: DiscoveredDevice[] }>(config.port, '/api/devices');
-      discoveredDevices = result.devices;
-      openChooser('Heizgeräte für die Erfassung', discoveredDevices.map(device => ({
-        key: String(device.index), label: `${device.name} · Gerät ${device.deviceId}`, selected: device.selected,
+      const devices = await runtime.api.devices();
+      const selectedDevices = new Set(store.getDevices().map(deviceKey));
+      const labels = deviceLabels(devices);
+      openChooser('Heizgeräte für die Erfassung', devices.map((device, index) => ({
+        key: String(index),
+        label: `${labels.get(deviceKey(device)) ?? device.name} · Gerät ${device.deviceId}`,
+        selected: selectedDevices.has(deviceKey(device)),
       })), async selected => {
-        await request(config.port, '/api/devices', post({
-          indexes: selected.map(item => Number(item.key)),
-        }));
+        if (!selected.length) throw new HttpError('Bitte mindestens ein Heizgerät auswählen.', 400);
+        if (runtime.collector.running) throw new HttpError('Messabfrage läuft. Bitte kurz warten.', 409);
+        store.setDevices(selected
+          .map(item => devices[Number(item.key)])
+          .filter((device): device is Device => device !== undefined));
+        await runtime.collector.restart();
+        if (runtime.collector.error) {
+          throw new HttpError(`Auswahl gespeichert, aber Messung fehlgeschlagen: ${runtime.collector.error}`, 502);
+        }
         await refresh();
       });
     } catch (error) {
@@ -401,7 +414,9 @@ async function main() {
     const next = status.devices[(index + direction + status.devices.length) % status.devices.length];
     if (!next) return;
     try {
-      await request(config.port, '/api/active-device', post({ id: next.id }));
+      const device = store.getDevices().find(item => deviceKey(item) === next.id);
+      if (!device) throw new HttpError('Gerät ist nicht mehr ausgewählt.', 404);
+      store.setDevice(device);
       await refresh();
     } catch (error) {
       logger.error(`Aktive Heizung konnte nicht gewechselt werden: ${error instanceof Error ? error.message : String(error)}`);
@@ -429,6 +444,17 @@ async function main() {
     void refresh();
   }
 
+  function close() {
+    if (stopped) return;
+    stopped = true;
+    if (timer) clearInterval(timer);
+    modal?.close();
+    screen.destroy();
+    removeLogSink();
+  }
+
+  screen.key('q', close);
+  screen.key('C-c', onQuit);
   screen.key('r', () => { void refresh(); });
   screen.key('1', () => cyclePeriod(0));
   screen.key('2', () => cyclePeriod(1));
@@ -448,40 +474,9 @@ async function main() {
     launchLogin(config.port);
   });
 
-  function shutdown() {
-    if (stopped) return;
-    stopped = true;
-    if (timer) clearInterval(timer);
-    modal?.close();
-    screen.destroy();
-    process.off('SIGINT', signalShutdown);
-    process.off('SIGTERM', signalShutdown);
-    void runtime.close().catch(error => {
-      logger.error(`Sauberes Beenden fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
-    }).finally(() => {
-      removeLogSink();
-    });
-  }
-  const signalShutdown = () => shutdown();
-  process.once('SIGINT', signalShutdown);
-  process.once('SIGTERM', signalShutdown);
-
-  let timer: NodeJS.Timeout | undefined;
   screen.render();
-  try {
-    await runtime.listen();
-    await refresh();
-    timer = setInterval(() => { void refresh(); }, 30_000);
-    timer.unref();
-  } catch (error) {
-    removeLogSink();
-    screen.destroy();
-    await runtime.close();
-    throw error;
-  }
+  await refresh();
+  timer = setInterval(() => { void refresh(); }, 30_000);
+  timer.unref();
+  return { close };
 }
-
-void main().catch(error => {
-  logger.error(`Terminaloberfläche konnte nicht gestartet werden: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
