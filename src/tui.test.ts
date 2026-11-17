@@ -3,18 +3,44 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
-import { createTerminalChooser } from './tui.ts';
+import { createTerminalChooser, createTerminalPanels } from './tui.ts';
 import { chartSeries } from './tui-model.ts';
 
-function terminal() {
+function terminal(columns = 80, rows = 24) {
   const input = new PassThrough();
   const output = Object.assign(new PassThrough(), {
-    columns: 80, rows: 24, isTTY: true,
+    columns, rows, isTTY: true,
   });
   output.resume();
   const screen = blessed.screen({ input, output, terminal: 'xterm', warnings: false });
   return { screen, close() { screen.destroy(); input.destroy(); output.destroy(); } };
 }
+
+test('terminal layout gives charts the available height and redraws after resizing', t => {
+  const { screen, close } = terminal(160, 50);
+  t.after(close);
+  const panels = createTerminalPanels(screen);
+  const data = [{ title: 'Vorlauf', x: ['10:00', '10:05'], y: [35, 36] }];
+  for (const chart of [panels.flowChart, panels.waterChart, panels.comparisonChart]) {
+    chart.options.data = data;
+    chart.setData(data);
+  }
+  for (const rows of [50, 80, 30, 50]) {
+    screen.program.rows = rows;
+    screen.program.emit('resize');
+    assert.equal(Number(panels.charts.top), 7);
+    assert.equal(Number(panels.charts.height) + Number(panels.footer.height) + 7, rows);
+    assert.ok(Number(panels.flowChart.height) >= Math.floor((rows - 15) / 2));
+    assert.ok(Number(panels.comparisonChart.height) >= Math.floor((rows - 15) / 2));
+    assert.equal(Number(panels.flowChart.height), Number(panels.waterChart.height));
+    assert.ok(Number(panels.footer.height) <= 8);
+    for (const chart of [panels.flowChart, panels.waterChart, panels.comparisonChart]) {
+      assert.match(chart.getContent(), /10:00/);
+      assert.doesNotMatch(chart.getContent(), /null|undefined/);
+      assert.ok(chart.getContent().split('\n').length <= Number(chart.height));
+    }
+  }
+});
 
 test('terminal chooser scrolls long labels horizontally and the complete list vertically', async t => {
   const { screen, close } = terminal();

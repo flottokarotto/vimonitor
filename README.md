@@ -81,6 +81,9 @@ Auswahlfenstern navigieren Hoch/Runter und Bild auf/ab durch die Liste;
 Links/Rechts scrollt lange Namen horizontal. `Enter` oder die Leertaste
 schaltet einen Eintrag um, `s` speichert und `Esc` schliesst. Ein Live-Protokoll
 ist direkt im TUI sichtbar.
+Die Charts nutzen den verfuegbaren Platz direkt unter dem Status; Auswertung
+und Logs bleiben in einem kompakten, per Maus scrollbar bedienbaren unteren Bereich.
+Beim Aendern der Terminalgroesse werden die Diagramme neu gezeichnet.
 
 Die Viessmann-Anbindung kapselt OAuth, Token-Erneuerung, HTTP und die
 Uebersetzung der Feature-Antworten. Anwendung und Datenerfassung verwenden

@@ -139,13 +139,65 @@ export function createTerminalChooser<T extends { key: string; label: string; se
   return { box, list, close };
 }
 
+export function createTerminalPanels(screen: blessed.Widgets.Screen) {
+  const charts = blessed.box({ top: 7, bottom: 8, left: 0, right: 0 });
+  const footer = blessed.box({ bottom: 0, height: 8, left: 0, right: 0 });
+  screen.append(charts);
+  screen.append(footer);
+  const flowChart = contrib.line({
+    top: 0, left: 0, width: '50%', height: '50%',
+    border: { type: 'line' }, label: ' Vorlauf · f Sensor wechseln ',
+    showLegend: false, wholeNumbersOnly: false,
+    style: { line: 'cyan', text: 'white', baseline: 'white' },
+  });
+  const waterChart = contrib.line({
+    top: 0, left: '50%', right: 0, height: '50%',
+    border: { type: 'line' }, label: ' Warmwasser · w Sensor wechseln ',
+    showLegend: false, wholeNumbersOnly: false,
+    style: { line: 'yellow', text: 'white', baseline: 'white' },
+  });
+  const comparisonChart = contrib.line({
+    top: '50%', bottom: 0, left: 0, right: 0,
+    border: { type: 'line' }, label: ' Temperaturvergleich · c Auswahl bearbeiten ',
+    showLegend: true, wholeNumbersOnly: false,
+    style: { line: 'green', text: 'white', baseline: 'white' },
+  });
+  for (const chart of [flowChart, waterChart, comparisonChart]) {
+    charts.append(chart);
+  }
+  const insightsBox = blessed.box({
+    parent: footer, top: 0, bottom: 0, left: 0, width: '50%', tags: true, scrollable: true,
+    mouse: true, scrollbar: { ch: ' ', style: { bg: 'magenta' } },
+    border: { type: 'line' }, label: ' Nacht-Auswertung & Zeitprogramme ',
+    style: { border: { fg: 'magenta' } },
+  });
+  const logs = blessed.log({
+    parent: footer, top: 0, bottom: 0, left: '50%', right: 0, tags: true,
+    mouse: true, scrollbar: { ch: ' ', style: { bg: 'yellow' } },
+    scrollback: 1000, scrollOnInput: true,
+    border: { type: 'line' }, label: ' Live-Protokoll ',
+    style: { border: { fg: 'yellow' } },
+  });
+  const resize = () => {
+    const footerHeight = Math.min(8, Math.max(4, Math.floor(Number(screen.height) * 0.16)));
+    charts.bottom = footerHeight;
+    footer.height = footerHeight;
+    for (const chart of [flowChart, waterChart, comparisonChart]) {
+      chart.emit('attach');
+    }
+    screen.render();
+  };
+  screen.on('resize', resize);
+  resize();
+  return { charts, footer, flowChart, waterChart, comparisonChart, insightsBox, logs };
+}
+
 export async function startTerminal(runtime: Runtime, onQuit: () => void): Promise<{ close(): void }> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error('Die Terminaloberfläche benötigt ein interaktives Terminal.');
   }
   const { config, store } = runtime;
   const screen = blessed.screen({ smartCSR: true, title: 'ViMonitor · Terminal' });
-  const grid = new contrib.grid({ rows: 20, cols: 12, screen });
   const header = blessed.box({
     top: 0, left: 0, width: '100%', height: 3, tags: true,
     style: { fg: 'white', bg: 'blue' },
@@ -156,36 +208,9 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
     border: { type: 'line' }, label: ' Status ',
     style: { border: { fg: 'cyan' } },
   });
-  const flowChart = grid.set(6, 0, 3, 6, contrib.line, {
-    label: ' Vorlauf · f Sensor wechseln ',
-    showLegend: false, wholeNumbersOnly: false,
-    style: { line: 'cyan', text: 'white', baseline: 'white' },
-  });
-  const waterChart = grid.set(6, 6, 3, 6, contrib.line, {
-    label: ' Warmwasser · w Sensor wechseln ',
-    showLegend: false, wholeNumbersOnly: false,
-    style: { line: 'yellow', text: 'white', baseline: 'white' },
-  });
-  const comparisonChart = grid.set(9, 0, 4, 12, contrib.line, {
-    label: ' Temperaturvergleich · c Auswahl bearbeiten ',
-    showLegend: true, wholeNumbersOnly: false,
-    style: { line: 'green', text: 'white', baseline: 'white' },
-  });
-  const insightsBox = blessed.box({
-    top: '66%', left: 0, width: '50%', height: '33%', tags: true, scrollable: true,
-    border: { type: 'line' }, label: ' Nacht-Auswertung & Zeitprogramme ',
-    style: { border: { fg: 'magenta' } },
-  });
-  const logs = blessed.log({
-    top: '66%', left: '50%', width: '50%', height: '33%', tags: true,
-    scrollback: 1000, scrollOnInput: true,
-    border: { type: 'line' }, label: ' Live-Protokoll ',
-    style: { border: { fg: 'yellow' } },
-  });
+  const { flowChart, waterChart, comparisonChart, insightsBox, logs } = createTerminalPanels(screen);
   screen.append(header);
   screen.append(statusBox);
-  screen.append(insightsBox);
-  screen.append(logs);
   const removeLogSink = logger.subscribe((entry: LogEntry) => {
     logs.log(terminalLog(entry));
     screen.render();
@@ -265,12 +290,14 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
 
   function showChart(widget: ReturnType<typeof contrib.line>, title: string, points: Point[], color: string) {
     const sampled = chartSeries(title, points);
-    widget.setData([{
+    const data = [{
       title,
       x: sampled.x,
       y: sampled.y,
       style: { line: color, text: color, baseline: 'white' },
-    }]);
+    }];
+    widget.options.data = data;
+    widget.setData(data);
   }
 
   async function loadCharts() {
@@ -305,7 +332,7 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
     showChart(flowChart, 'Vorlauf °C', histories.get(flowKey) ?? [], 'cyan');
     showChart(waterChart, 'Warmwasser °C', histories.get(waterKey) ?? [], 'yellow');
     const selected = allSeries().filter(item => comparison.has(item.key));
-    comparisonChart.setData(selected.map((item, index) => {
+    const data = selected.map((item, index) => {
       const sampled = chartSeries(item.display, histories.get(item.key) ?? []);
       return {
         title: item.display,
@@ -313,7 +340,10 @@ export async function startTerminal(runtime: Runtime, onQuit: () => void): Promi
         y: sampled.y,
         style: { line: colorFor(index), text: colorFor(index), baseline: 'white' },
       };
-    }));
+    });
+    comparisonChart.options.data = data.length ? data
+      : [{ title: 'Keine Temperaturen ausgewählt', x: [], y: [] }];
+    comparisonChart.setData(comparisonChart.options.data);
   }
 
   async function refresh() {
